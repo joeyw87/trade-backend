@@ -3,7 +3,7 @@ const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
-const PORT = 3001; // 리액트(5173)와 겹치지 않게 3001번 포트 사용
+const PORT = process.env.PORT || 3001; // 리액트(5173)와 겹치지 않게 3001번 포트 사용
 
 // 1. CORS 허용 설정 (매우 중요!)
 // 개발할 때 쓰는 localhost와, 실제 배포된 깃허브 페이지 주소를 모두 허용합니다.
@@ -41,5 +41,5 @@ app.get('/api/yahoo', async (req, res) => {
 
 // 3. 서버 실행
 app.listen(PORT, () => {
-    console.log(`🚀 나만의 듬직한 프록시 서버가 http://localhost:${PORT} 에서 돌아가는 중입니다!`);
+    console.log(`🚀 나만의 듬직한 프록시 서버가 포트 ${PORT} 에서 돌아가는 중입니다!`);
 });
