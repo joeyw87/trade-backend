@@ -130,6 +130,7 @@ app.get('/api/kis/top-volume', async (req, res) => {
             // 2️⃣ KIS API가 응답한 나머지 모든 필드(데이터)를 객체 안에 통째로 쓸어 담기!
             ...stock
         }));
+        
         res.json({
             success: true,
             count: topStocks.length,
