@@ -3,6 +3,8 @@ require('./logger');
 
 const express = require('express');
 const cors = require('cors');
+// 텔레그램 모듈 불러오기
+//const { sendTelegramAlert } = require('./telegram');
 
 // 1️⃣ 추가: .env 파일에서 KIS_APP_KEY, KIS_APP_SECRET 환경변수를 불러옵니다.
 require('dotenv').config();
@@ -21,6 +23,7 @@ app.use(cors({
 // ════════════════════════════════════════════════════════
 const yahooRouter = require('./routes/yahooRouter');
 const kisRouter = require('./routes/kisRouter');
+const supabaseRouter = require('./routes/supabaseRouter');
 
 // "/api/yahoo" 로 시작하는 모든 요청은 yahooRouter 에게 맡깁니다.
 app.use('/api/yahoo', yahooRouter);
@@ -28,7 +31,13 @@ app.use('/api/yahoo', yahooRouter);
 // "/api/kis" 로 시작하는 모든 요청은 kisRouter 에게 맡깁니다.
 app.use('/api/kis', kisRouter);
 
+//"/api/supabase" 주소로 들어오면 연결!
+app.use('/api/supabase', supabaseRouter);
+
 // 3. 서버 실행
-app.listen(PORT, () => {
+app.listen(PORT, async() => {
     console.log(`🚀 나만의 듬직한 하이브리드 백엔드 서버가 포트 ${PORT} 에서 돌아가는 중입니다!`);
+
+    // 서버가 켜지면 텔레그램으로 푸시 알림 전송
+    //await sendTelegramAlert("🤖 <b>[알림]</b> 자동매매 백엔드 서버가 성공적으로 가동되었습니다!\n\n현재 대기 중입니다...");
 });

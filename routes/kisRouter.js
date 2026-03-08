@@ -34,6 +34,8 @@ router.get('/top-volume', async (req, res) => {
         
         // 🚨 랭킹 API는 실전 도메인에서만 정상 작동할 확률이 높습니다.
         const KIS_DOMAIN = 'https://openapivts.koreainvestment.com:29443'; 
+        // 화면 필터 요청제외 코드
+        const exclCode = req.query.exclCode || '0000000000';
 
         const response = await axios.get(`${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/volume-rank`, {
             headers: {
@@ -50,7 +52,7 @@ router.get('/top-volume', async (req, res) => {
                 FID_DIV_CLS_CODE: '0',       // 0:(전체) 1:(보통주) 2:(우선주)
                 FID_BLNG_CLS_CODE: '0',      // 0: 평균거래량 1:거래증가율 2:평균거래회전율 3:거래금액순 4:평균거래금액회전율
                 FID_TRGT_CLS_CODE: '111111111', // 타겟 클래스 (보통주 등)
-                FID_TRGT_EXLS_CLS_CODE: '0000000000', // 제외 클래스 (우선주, 관리종목 등 제외 설정 가능)
+                FID_TRGT_EXLS_CLS_CODE: exclCode, // 제외 클래스 (우선주, 관리종목 등 제외 설정 가능)
                 FID_INPUT_PRICE_1: '',
                 FID_INPUT_PRICE_2: '',
                 FID_VOL_CNT: '',
