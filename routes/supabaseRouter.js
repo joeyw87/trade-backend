@@ -18,7 +18,7 @@ router.get('/searchTicker', async (req, res) => {
     try {
         const { data, error } = await supabase
             .from('T_TICKER_MST')
-            .select('ticker_cd, ticker_nm')      // 💡 스키마에 맞게 'name'을 'ticker_nm'으로 변경!
+            .select('ticker_cd, ticker_nm, ticker_nmas, market_type')      // 💡 스키마에 맞게 'name'을 'ticker_nm'으로 변경!
             .ilike('ticker_nm', `%${keyword}%`)  // 💡 검색 조건도 'ticker_nm'으로 변경!
             .limit(10);
 
