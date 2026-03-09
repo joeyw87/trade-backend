@@ -31,7 +31,7 @@ router.get('/test-token', async (req, res) => {
 // ════════════════════════════════════════════════════════
 router.get('/top-volume', async (req, res) => {
     try {
-        const exclCode = req.query.exclCode || '0000000000';
+        const exclCode = req.query.exclCode || '1'; //디폴트 일반주식만 가져오기
 
         // 💡 Service 함수 호출 (데이터만 딱 받아옵니다)
         const topStocks = await getTopVolumeList(exclCode);
@@ -54,7 +54,7 @@ router.get('/top-volume', async (req, res) => {
 // ════════════════════════════════════════════════════════
 router.get('/closing-bet', async (req, res) => {
     try {
-        const exclCode = req.query.exclCode || '0000000000';
+        const exclCode = req.query.exclCode || '1';
 
         // 💡 Service 함수 호출 (이름 변경 완료!)
         const result = await getClosingBetList(exclCode);
