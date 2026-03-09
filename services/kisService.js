@@ -151,20 +151,26 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
                     positionRatio = (price - lowPrice) / (highPrice - lowPrice);
                 }
 
-                // 조건: 윗꼬리가 짧고(고가 부근) 캔들 위쪽 80% 이상에 위치하는 종목
-                if (positionRatio > 0.8) {
+                // 시가총액 계산 (현재가 * 상장주식수)
+                const totalPrice = price * stock.listedShares; 
+                const MIN_TOTAL_PRICE = 100000000000; // 기준선: 1,000억 원
+
+                // 조건: 윗꼬리가 짧고(고가 부근 80% 이상) && 시가총액이 1,000억 이상인 종목!
+                if (positionRatio > 0.8 && totalPrice >= MIN_TOTAL_PRICE) {
                     candidates.push({
                         ...stock,
                         price: price,         
                         highPrice: highPrice, 
                         lowPrice: lowPrice,   
-                        positionRatioPercent: (positionRatio * 100).toFixed(1)
+                        positionRatioPercent: (positionRatio * 100).toFixed(1),
+                        totalPrice: totalPrice,
+                        totalPriceFormatted: `${Math.floor(totalPrice / 100000000)}억` // 'ㅇㅇ억' 단위로 보기 쉽게 변환
                     });
                 }
             }
 
             // KIS 서버 요청 중간 딜레이 추가
-            await delay(500);
+            await delay(400);
 
         } catch (err) {
             const kisErrorMsg = err.response?.data?.msg1 || err.message;
