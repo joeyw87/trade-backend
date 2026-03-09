@@ -4,7 +4,7 @@ const { getKisAccessToken } = require('../kisAuth');
 // ════════════════════════════════════════════════════════
 // [서비스 로직 1] KIS API 거래대금 상위 종목 리스트 가져오기
 // ════════════════════════════════════════════════════════
-async function getTopVolumeList(exclCode = '0000000000') {
+async function getTopVolumeList(exclCode = '1') {
     const token = await getKisAccessToken();
     const KIS_DOMAIN = 'https://openapivts.koreainvestment.com:29443';
 
@@ -55,7 +55,7 @@ async function getTopVolumeList(exclCode = '0000000000') {
 // ════════════════════════════════════════════════════════
 // [서비스 로직 2] 종가베팅 조건(윗꼬리 짧음)에 맞는 종목 필터링
 // ════════════════════════════════════════════════════════
-async function getClosingBetList(exclCode = '0000000000') {
+async function getClosingBetList(exclCode = '1') {
     // 💡 방금 위에서 만든 함수를 재사용하여 일단 거래대금 상위 데이터를 다 가져옵니다!
     const topStocks = await getTopVolumeList(exclCode);
     const candidates = [];
