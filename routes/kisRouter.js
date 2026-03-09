@@ -31,10 +31,11 @@ router.get('/test-token', async (req, res) => {
 // ════════════════════════════════════════════════════════
 router.get('/top-volume', async (req, res) => {
     try {
-        const exclCode = req.query.exclCode || '1'; //디폴트 일반주식만 가져오기
+        const marketType = req.query.marketType || 'ALL'; //ALL: 전체, KOSPI: 코스피, KOSDAQ: 코스닥
+        const exclCode = req.query.exclCode || '111111111'; //디폴트 일반주식만 가져오기
 
         // 💡 Service 함수 호출 (데이터만 딱 받아옵니다)
-        const topStocks = await getTopVolumeList(exclCode);
+        const topStocks = await getTopVolumeList(marketType, exclCode);
 
         res.json({
             success: true,
@@ -54,10 +55,11 @@ router.get('/top-volume', async (req, res) => {
 // ════════════════════════════════════════════════════════
 router.get('/closing-bet', async (req, res) => {
     try {
-        const exclCode = req.query.exclCode || '1';
+        const marketType = req.query.marketType || 'ALL'; //ALL: 전체, KOSPI: 코스피, KOSDAQ: 코스닥
+        const exclCode = req.query.exclCode || '111111111';
 
         // 💡 Service 함수 호출 (이름 변경 완료!)
-        const result = await getClosingBetList(exclCode);
+        const result = await getClosingBetList(marketType, exclCode);
 
         res.json({
             success: true,
