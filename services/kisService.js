@@ -191,7 +191,7 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
             }
 
             // KIS 서버 요청 중간 딜레이 추가
-            await delay(400);
+            await delay(500);
 
         } catch (err) {
             const kisErrorMsg = err.response?.data?.msg1 || err.message;
