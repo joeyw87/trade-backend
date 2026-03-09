@@ -64,6 +64,7 @@ router.get('/closing-bet', async (req, res) => {
         res.json({
             success: true,
             totalScanned: result.totalScanned,
+            totalScanList: result.totalScanList,
             count: result.candidates.length,
             candidates: result.candidates
         });

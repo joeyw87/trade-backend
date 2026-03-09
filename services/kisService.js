@@ -174,7 +174,8 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
 
     return {
         totalScanned: topStocks.length, // ALL일 경우 60으로 찍힙니다!
-        candidates: candidates
+        totalScanList: topStocks, //전제 조회 종목
+        candidates: candidates //로직 필터 종목
     };
 }
 
