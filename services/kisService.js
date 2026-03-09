@@ -98,6 +98,7 @@ async function getTopVolumeList(marketType = 'ALL', exclCode = '111111111') {
 
 // ════════════════════════════════════════════════════════
 // [서비스 로직 2] 종가베팅 조건(윗꼬리 짧음)에 맞는 종목 필터링
+// 시가총액 1000억 이상 
 // ════════════════════════════════════════════════════════
 async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
     const token = await getKisAccessToken();
@@ -141,6 +142,10 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
                 const lowPrice = Number(detail.stck_lwpr);  
                 const changeRate = Number(detail.prdy_ctrt);
 
+                // 💡 52주 최고가(신고가) 및 비율 데이터 추출
+                const w52HighPrice = Number(detail.w52_hgpr); 
+                const rateFromHigh = Number(detail.d250_hgpr_vrss_prpr_rate);
+
                 let positionRatio = 0;
 
                 // 방어 로직: 고가와 저가가 같은 경우 (점상한가 등)
@@ -155,8 +160,21 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
                 const totalPrice = price * stock.listedShares; 
                 const MIN_TOTAL_PRICE = 100000000000; // 기준선: 1,000억 원
 
-                // 조건: 윗꼬리가 짧고(고가 부근 80% 이상) && 시가총액이 1,000억 이상인 종목!
-                if (positionRatio > 0.8 && totalPrice >= MIN_TOTAL_PRICE) {
+                // 💡 [전략 1] 종가베팅: 윗꼬리가 짧고(80% 이상) && 1,000억 이상
+                const isClosingBet = positionRatio > 0.8 && totalPrice >= MIN_TOTAL_PRICE;
+
+                // 💡 [전략 2] 신고가 돌파: 현재가가 52주 최고가를 넘었거나 같음 && 1,000억 이상
+                const isNewHighBreakout = price >= w52HighPrice && totalPrice >= MIN_TOTAL_PRICE;
+
+                // 조건: 종가베팅이거나 신고가를 돌파한 강력한 종목이라면 추가!
+                if (isClosingBet || isNewHighBreakout) {
+
+                    // 💡 '조'와 '억' 단위 깔끔하게 포맷팅 (삼항 연산자)
+                    const eok = Math.floor(totalPrice / 100000000); 
+                    const formattedTotalPrice = eok >= 10000 
+                        ? `${Math.floor(eok / 10000)}조 ${eok % 10000}억` 
+                        : `${eok}억`;
+
                     candidates.push({
                         ...stock,
                         price: price,         
@@ -164,7 +182,10 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
                         lowPrice: lowPrice,   
                         positionRatioPercent: (positionRatio * 100).toFixed(1),
                         totalPrice: totalPrice,
-                        totalPriceFormatted: `${Math.floor(totalPrice / 100000000)}억` // 'ㅇㅇ억' 단위로 보기 쉽게 변환
+                        totalPriceFormatted: formattedTotalPrice, //시가총액 조/억 텍스트
+                        dataFg: isNewHighBreakout ? '신고가돌파' : '종가베팅',
+                        w52HighPrice: w52HighPrice,
+                        rateFromHigh: rateFromHigh
                     });
                 }
             }
