@@ -92,7 +92,7 @@ router.get('/us-closing-bet', async (req, res) => {
                 }
 
                 // 서버 보호 딜레이 (야후 서버가 차단하지 않도록 0.3초 대기)
-                await delay(300);
+                await delay(500);
 
             } catch (err) {
                 console.error(`[${stock.ticker}] 상세 조회 실패:`, err.message);
