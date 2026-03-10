@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
+
 // ════════════════════════════════════════════════════════
 //  [라우터 1] 야후 파이낸스 API 프록시 (나만의 프록시 주소) - 대시보드 등 사용
 //  (메인 server.js에서 /api/yahoo 로 넘겨주므로 여기선 / 로 받습니다)

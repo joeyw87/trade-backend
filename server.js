@@ -22,11 +22,13 @@ app.use(cors({
 //  [라우터 연결부] 분리해둔 라우터 파일들을 불러와서 주소와 매핑합니다.
 // ════════════════════════════════════════════════════════
 const yahooRouter = require('./routes/yahooRouter');
+const yahoo2Router = require('./routes/yahoo2Router');
 const kisRouter = require('./routes/kisRouter');
 const supabaseRouter = require('./routes/supabaseRouter');
 
 // "/api/yahoo" 로 시작하는 모든 요청은 yahooRouter 에게 맡깁니다.
 app.use('/api/yahoo', yahooRouter);
+app.use('/api/yahoo2', yahoo2Router);
 
 // "/api/kis" 로 시작하는 모든 요청은 kisRouter 에게 맡깁니다.
 app.use('/api/kis', kisRouter);

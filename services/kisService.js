@@ -98,7 +98,7 @@ async function getTopVolumeList(marketType = 'ALL', exclCode = '111111111') {
 
 // ════════════════════════════════════════════════════════
 // [서비스 로직 2] 종가베팅 조건(윗꼬리 짧음)에 맞는 종목 필터링
-// 시가총액 1000억 이상 
+// 거래대금 순위 30 종목 가져오기, 시가총액 1000억 이상 
 // ════════════════════════════════════════════════════════
 async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
     const token = await getKisAccessToken();
