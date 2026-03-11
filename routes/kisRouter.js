@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 
 // 💡 1. 비즈니스 로직(Service) 모듈 불러오기
-const { getTopVolumeList, getClosingBetList } = require('../services/kisService');
+const kisService = require('../services/kisService');
 
 // 💡 2. 인증 모듈 불러오기 (테스트 라우터용)
 const { getKisAccessToken } = require('../kisAuth');
@@ -35,7 +35,7 @@ router.get('/top-volume', async (req, res) => {
         const exclCode = req.query.exclCode || '111111111'; //디폴트 일반주식만 가져오기
 
         // 💡 Service 함수 호출 (데이터만 딱 받아옵니다)
-        const topStocks = await getTopVolumeList(marketType, exclCode);
+        const topStocks = await kisService.getTopVolumeList(marketType, exclCode);
 
         res.json({
             success: true,
@@ -59,7 +59,7 @@ router.get('/closing-bet', async (req, res) => {
         const exclCode = req.query.exclCode || '111111111';
 
         // 💡 Service 함수 호출 (이름 변경 완료!)
-        const result = await getClosingBetList(marketType, exclCode);
+        const result = await kisService.getClosingBetList(marketType, exclCode);
 
         res.json({
             success: true,
@@ -72,6 +72,27 @@ router.get('/closing-bet', async (req, res) => {
     } catch (error) {
         console.error("종가베팅 조회 에러:", error.message);
         res.status(500).json({ success: false, message: "종가베팅 후보 검색 실패" });
+    }
+});
+
+// ════════════════════════════════════════════════════════
+// [검색 API 3] 엔벨로프 하한선(낙폭과대) 종목 검색 API
+// GET /api/kis/envelope
+// ════════════════════════════════════════════════════════
+router.get('/envelope', async (req, res) => {
+    try {
+        // KOSPI, KOSDAQ, ALL 중 선택 가능 (기본값 ALL)
+        const marketType = req.query.marketType || 'ALL'; 
+        const result = await kisService.getEnvelopeBetList(marketType);
+        
+        res.json({
+            success: true,
+            count: result.candidates ? result.candidates.length : 0,
+            ...result
+        });
+    } catch (error) {
+        console.error('엔벨로프 라우터 에러:', error);
+        res.status(500).json({ success: false, error: '엔벨로프 스캔 중 오류가 발생했습니다.' });
     }
 });
 

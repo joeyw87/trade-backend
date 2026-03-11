@@ -49,7 +49,7 @@ async function getTopVolumeList(marketType = 'ALL', exclCode = '111111111') {
     //디버그 모드일 때만 파라미터 출력
     if (process.env.DEBUG_MODE === 'true') {
         console.log('=================================================');
-        console.log('👀 [DEBUG] KIS 거래대금 상위 API 요청 파라미터');
+        console.log(`👀 [DEBUG] KIS 거래대금 \[${marketType}\] 상위 API 요청 파라미터`);
         console.log(JSON.stringify(requestParam.params));
         console.log('=================================================');
     }
@@ -59,7 +59,7 @@ async function getTopVolumeList(marketType = 'ALL', exclCode = '111111111') {
 
     if (process.env.DEBUG_MODE === 'true') {
         console.log('=================================================');
-        console.log(`✅ [DEBUG] KIS 응답 완료 (총 ${rawData ? rawData.length : 0}건)`);
+        console.log(`✅ [DEBUG] KIS 응답 완료 (\[${marketType}\] 총 ${rawData ? rawData.length : 0}건)`);
         // 데이터가 30~50개면 너무 기니까, 첫 번째 데이터만 샘플로 찍어줍니다.
         if (rawData && rawData.length > 0) {
             console.log('📌 [첫 번째 종목 샘플]:', JSON.stringify(rawData[0]));
@@ -206,7 +206,102 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
     };
 }
 
+// ════════════════════════════════════════════════════════
+// [서비스 로직] 엔벨로프 하한선(투매/낙폭과대) 돌파 종목 필터링
+// ════════════════════════════════════════════════════════
+async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
+    const token = await getKisAccessToken();
+    let topStocks = [];
+
+    // 1. 거래대금 상위 종목 싹 가져오기 (기존 함수 재활용!)
+    if(marketType === 'ALL'){
+        const [kospiData, kosdaqData] = await Promise.all([
+            getTopVolumeList('KOSPI', exclCode),
+            getTopVolumeList('KOSDAQ', exclCode)
+        ]);
+        let combinedData = [...kospiData, ...kosdaqData];
+        combinedData.sort((a, b) => b.tradeValue - a.tradeValue);
+        topStocks = combinedData;
+    } else {
+        topStocks = await getTopVolumeList(marketType, exclCode);
+    }
+
+    const candidates = [];
+    if (topStocks.length === 0) return { totalScanned: 0, candidates: [] };
+
+    console.log(`👀 [DEBUG] 엔벨로프 하한선 닿은 종목 스캔 시작... (\[${marketType}\] 총 ${topStocks.length}건)`);
+
+    // 2. 60개 종목을 돌면서 최근 일봉 차트를 까봅니다.
+    for (const stock of topStocks) {
+        try {
+            // 💡 핵심 API: '국내주식 현재가 일자별' (최근 30일 치 일봉 종가 제공)
+            const chartRes = await axios.get(`${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/inquire-daily-price`, {
+                headers: getKisHeaders(token, 'FHKST01010400'),
+                params: {
+                    FID_COND_MRKT_DIV_CODE: 'J',
+                    FID_INPUT_ISCD: stock.ticker,
+                    FID_ORG_ADJ_PRC: '1', // 1: 수정주가 반영 (액면분할 등으로 인한 차트 붕괴 방지)
+                    FID_PERIOD_DIV_CODE: 'D' //D : (일)최근 30거래일, W : (주)최근 30주, M : (월)최근 30개월
+                }
+            });
+
+            const dailyData = chartRes.data.output; // 최근 30일 치 데이터 배열
+
+            if (dailyData && dailyData.length >= 20) {
+                // 3. 20일 이동평균선(MA20) 직접 계산하기
+                let sum = 0;
+                for (let i = 0; i < 20; i++) {
+                    sum += Number(dailyData[i].stck_clpr); // 매일매일의 종가를 누적
+                }
+                const ma20 = sum / 20; // 20일 종가 평균
+
+                // 4. 엔벨로프 하한선 계산 (20일선의 -20% 지점)
+                const envelopeRate = 0.04; // 20% (설정을 바꾸고 싶다면 여기를 0.15, 0.04 등으로 수정)
+                const lowerBand = Math.floor(ma20 * (1 - envelopeRate)); 
+
+                const currentPrice = Number(stock.price);
+                const marketCap = currentPrice * stock.listedShares;
+                const MIN_MARKET_CAP = 100000000000; // 1,000억 이상 조건은 그대로 유지!
+
+                // 💡 [필터링 조건] 현재가가 하한선보다 낮거나 같고, 시가총액이 1천억 이상인 우량잡주인가?
+                if (currentPrice <= lowerBand && marketCap >= MIN_MARKET_CAP) {
+                    
+                    const eok = Math.floor(marketCap / 100000000); 
+                    const formattedTotalPrice = eok >= 10000 
+                        ? `${Math.floor(eok / 10000)}조 ${eok % 10000}억` 
+                        : `${eok}억`;
+
+                    candidates.push({
+                        ...stock,
+                        ma20: Math.floor(ma20),
+                        lowerBand: lowerBand, // 계산된 하한선 가격
+                        price: currentPrice,
+                        totalPriceFormatted: formattedTotalPrice,
+                        
+                        // 현재가가 하한선 대비 얼마나 싼지(괴리율)도 계산해서 줍니다. (예: 하한선보다 3% 더 빠짐 = -3%)
+                        gapFromLowerBand: (((currentPrice / lowerBand) - 1) * 100).toFixed(2), 
+                        dataFg: '엔벨하한'
+                    });
+                }
+            }
+
+            // KIS 서버 보호용 딜레이
+            await delay(300);
+
+        } catch (err) {
+            console.error(`[${stock.name}] 일봉 데이터 조회 실패:`, err.message);
+        }
+    }
+
+    return {
+        totalScanned: topStocks.length,
+        totalScanList: topStocks,
+        candidates: candidates
+    };
+}
+
 module.exports = {
     getTopVolumeList,
-    getClosingBetList
+    getClosingBetList,
+    getEnvelopeBetList
 };
