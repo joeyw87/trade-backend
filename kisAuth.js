@@ -5,9 +5,9 @@ const KIS_APP_KEY = process.env.KIS_APP_KEY;
 const KIS_APP_SECRET = process.env.KIS_APP_SECRET;
 
 // 🚨 실전투자 전용 도메인
-//const KIS_DOMAIN = 'https://openapi.koreainvestment.com:9443';
+const KIS_DOMAIN = 'https://openapi.koreainvestment.com:9443';
 // 🚨 모의투자 전용 도메인
-const KIS_DOMAIN = 'https://openapivts.koreainvestment.com:29443';
+//const KIS_DOMAIN = 'https://openapivts.koreainvestment.com:29443';
 
 // 메모리에 토큰과 만료 시간을 저장해둘 변수
 let cachedToken = null;

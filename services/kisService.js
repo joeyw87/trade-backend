@@ -1,12 +1,13 @@
 const axios = require('axios');
-const { getKisAccessToken } = require('../kisAuth');
+const { getKisAccessToken, KIS_DOMAIN } = require('../kisAuth');
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ════════════════════════════════════════════════════════
 // 💡 공통 설정 (도메인 & 헤더 생성기)
 // ════════════════════════════════════════════════════════
-const KIS_DOMAIN = 'https://openapivts.koreainvestment.com:29443';
+//const KIS_DOMAIN = 'https://openapivts.koreainvestment.com:29443'; //모의투자
+//const KIS_DOMAIN = 'https://openapi.koreainvestment.com:9443'; //실전투자
 
 // 토큰과 TR_ID만 넣으면 KIS가 원하는 헤더를 찍어내는 공용 함수
 const getKisHeaders = (token, tr_id) => ({
@@ -106,11 +107,15 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
 
     if(marketType === 'ALL'){
         // 코스피 30개, 코스닥 30개 순위 가져옴
-        const [kospiData, kosdaqData] = await Promise.all([
-            getTopVolumeList('KOSPI', exclCode),
-            getTopVolumeList('KOSDAQ', exclCode)
-        ]);
+        // const [kospiData, kosdaqData] = await Promise.all([
+        //     getTopVolumeList('KOSPI', exclCode),
+        //     getTopVolumeList('KOSDAQ', exclCode)
+        // ]);
 
+        const kospiData = await getTopVolumeList('KOSPI', exclCode);
+        await delay(500);
+        const kosdaqData = await getTopVolumeList('KOSDAQ', exclCode);
+        
         // 두 결과 합치고 거래대금 순으로 정렬 (자르지 않고 60개 전부 사용!)
         let combinedData = [...kospiData, ...kosdaqData];
         combinedData.sort((a, b) => b.tradeValue - a.tradeValue);
@@ -215,10 +220,15 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
 
     // 1. 거래대금 상위 종목 싹 가져오기 (기존 함수 재활용!)
     if(marketType === 'ALL'){
-        const [kospiData, kosdaqData] = await Promise.all([
-            getTopVolumeList('KOSPI', exclCode),
-            getTopVolumeList('KOSDAQ', exclCode)
-        ]);
+        // const [kospiData, kosdaqData] = await Promise.all([
+        //     getTopVolumeList('KOSPI', exclCode),
+        //     getTopVolumeList('KOSDAQ', exclCode)
+        // ]);
+
+        const kospiData = await getTopVolumeList('KOSPI', exclCode);
+        await delay(500);
+        const kosdaqData = await getTopVolumeList('KOSDAQ', exclCode);
+
         let combinedData = [...kospiData, ...kosdaqData];
         combinedData.sort((a, b) => b.tradeValue - a.tradeValue);
         topStocks = combinedData;

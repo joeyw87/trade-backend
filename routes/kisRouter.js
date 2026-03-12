@@ -4,6 +4,8 @@ const router = express.Router();
 
 // 💡 1. 비즈니스 로직(Service) 모듈 불러오기
 const kisService = require('../services/kisService');
+// 디스코드 서비스
+const discordService = require('../services/discordService');
 
 // 💡 2. 인증 모듈 불러오기 (테스트 라우터용)
 const { getKisAccessToken } = require('../kisAuth');
@@ -84,6 +86,11 @@ router.get('/envelope', async (req, res) => {
         // KOSPI, KOSDAQ, ALL 중 선택 가능 (기본값 ALL)
         const marketType = req.query.marketType || 'ALL'; 
         const result = await kisService.getEnvelopeBetList(marketType);
+
+        // 💡 1. 종목이 1개라도 포착되었다면 디스코드로 쏜다!
+        if (result.candidates && result.candidates.length > 0) {
+            await discordService.sendDiscordMessage('엔벨로프 하한선', result.candidates);
+        }
         
         res.json({
             success: true,
