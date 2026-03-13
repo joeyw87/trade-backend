@@ -78,7 +78,7 @@ setInterval(() => {
     const minute = now.getMinutes();
 
     // 1. 주말(토=6, 일=0)에는 시계를 봐도 아무것도 안 하고 패스!
-    //if (day === 0 || day === 6) return;
+    if (day === 0 || day === 6) return;
 
     const formattedHour = String(hour).padStart(2, '0');
     const formattedMinute = String(minute).padStart(2, '0');
@@ -94,7 +94,7 @@ setInterval(() => {
         "13:00": "ENVEL",
         "14:00": "ENVEL",
         "15:00": "ENVEL",
-        "15:05": "CLOSE_BET",
+        "15:05": "CLOSE_BET",   //종가베팅
         "15:15": "CLOSE_BET"
     };
 
