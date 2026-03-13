@@ -4,6 +4,8 @@ const TARGET_URL = 'https://trade-backend-3o2e.onrender.com/api/yahoo?ticker=005
 const ENVEL_URL = 'https://trade-backend-3o2e.onrender.com/api/kis/envelope?marketType=ALL';
 const CLOSE_BET_URL = 'https://trade-backend-3o2e.onrender.com/api/kis/closing-bet?marketType=ALL';
 
+// 디스코드 서비스
+const discordService = require('./services/discordService');
 
 // 14분(밀리초 단위) 설정: 14 * 60초 * 1000밀리초
 const INTERVAL_MS = 14 * 60 * 1000;         // 14분 (서버 찌르기용)
@@ -33,11 +35,11 @@ setInterval(async () => {
 // ════════════════════════════════════════════════════════
 // 2. 디스코드로 엔벨 알림 보내는 타이머 (8:30, 9:00, 15:00)
 // ════════════════════════════════════════════════════════
-async function sendDiscordHeartbeat(currentTime) {
+async function sendDiscordHeartbeat(strategyType) {
     try {
         let response;
         let strategyName = "";
-        if(currentTime === '15:05' || currentTime === '23:18'){
+        if (strategyType === 'CLOSE_BET') {
             response = await fetch(CLOSE_BET_URL); 
             strategyName = "종가베팅";
         }else{
@@ -54,8 +56,6 @@ async function sendDiscordHeartbeat(currentTime) {
             if (data.candidates && data.candidates.length > 0) {
                 await discordService.sendDiscordMessage(strategyName, data.candidates);
             }
-
-            console.log(`[${time}] 엔벨로프 조회 완료! (상태: ${response.status})`);
         } else {
             console.log(`[${time}] 엔벨로프 호출 시도 했으나 서버 상태가 이상합니다. (상태: ${response.status})`);
         }
@@ -78,7 +78,7 @@ setInterval(() => {
     const minute = now.getMinutes();
 
     // 1. 주말(토=6, 일=0)에는 시계를 봐도 아무것도 안 하고 패스!
-    if (day === 0 || day === 6) return;
+    //if (day === 0 || day === 6) return;
 
     const formattedHour = String(hour).padStart(2, '0');
     const formattedMinute = String(minute).padStart(2, '0');
@@ -88,17 +88,22 @@ setInterval(() => {
     if (lastSentTime === currentTime) return;
 
     // 4. 🎯 우리가 약속한 시간인지 확인합니다!
-    const isTargetTime = (
-        currentTime === "08:30" || 
-        currentTime === "09:00" || 
-        currentTime === "15:00" || 
-        currentTime === "15:05" || currentTime === "23:18"
-    );
+    const scheduleMap = {
+        "08:30": "ENVEL",
+        "09:00": "ENVEL",
+        "13:00": "ENVEL",
+        "14:00": "ENVEL",
+        "15:00": "ENVEL",
+        "15:05": "CLOSE_BET",
+        "15:15": "CLOSE_BET"
+    };
 
-    if (isTargetTime) {
+    const strategyType = scheduleMap[currentTime];
+
+    if (strategyType) {
         lastSentTime = currentTime; // "나 방금 8시 30분 알림 보냈어!" 하고 기록
         console.log(`\n⏰ [${now.toLocaleTimeString()}] 약속된 시간이 되었습니다. 장 스캔을 시작합니다!`);
         
-        sendDiscordHeartbeat(currentTime); // 스캔 및 디스코드 발송 지시!
+        sendDiscordHeartbeat(strategyType); // 스캔 및 디스코드 발송 지시!
     }
 }, 30 * 1000); // 30초(30,000ms)마다 시계 확인

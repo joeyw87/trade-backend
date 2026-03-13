@@ -1,4 +1,5 @@
 const axios = require('axios');
+require('dotenv').config();
 
 async function sendDiscordMessage(strategyName, candidates) {
     const isEnvelope = strategyName.includes('엔벨로프');
@@ -21,15 +22,31 @@ async function sendDiscordMessage(strategyName, candidates) {
                 : `https://finance.naver.com/item/main.naver?code=${stock.ticker}`; 
 
             // 점수 또는 괴리율 텍스트 세팅
-            let scoreText = '';
-            if (stock.score) {
-                scoreText = `(💯 ${stock.score}점)`;
-            } else if (stock.gapFromLowerBand) {
-                scoreText = `(📉 이격 ${stock.gapFromLowerBand}%)`;
+            let extraText = '';
+            
+            if (isEnvelope) {
+                // 🩸 엔벨로프 전략일 때
+                if (stock.score) {
+                    extraText = `(💯 ${stock.score}점)`;
+                } else if (stock.gapFromLowerBand) {
+                    extraText = `(📉 이격 ${stock.gapFromLowerBand}%)`;
+                } else {
+                    extraText = `(🩸 낙폭과대)`;
+                }
+            } else {
+                // 🔥 종가베팅 전략일 때 (점수가 없으므로 돌파 포착 문구로 대체)
+                // 만약 나중에 백엔드에서 stock.changeRate(등락률)을 넘겨준다면 `(🔥 +5.2%)` 처럼 쓸 수도 있습니다!
+                if (stock.changeRate) {
+                    extraText = `(🔥 ${stock.changeRate > 0 ? '+' : ''}${stock.changeRate}%)`;
+                } else {
+                    extraText = `(🎯 조건돌파)`;
+                }
             }
 
-            // 🔹 출력 포맷: "1. [삼성전자](링크) : 75,000원 (📉 이격 -4.2%)"
-            return `**${index + 1}. [${stock.name || stock.ticker}](${chartUrl})** : ${stock.price.toLocaleString()}${currency} ${scoreText}`;
+            // 🔹 출력 포맷 
+            // 엔벨로프: "1. [삼성전자](링크) : 75,000원 (📉 이격 -4.2%)"
+            // 종가베팅: "1. [SK하이닉스](링크) : 150,000원 (🎯 조건돌파)"
+            return `**${index + 1}. [${stock.name || stock.ticker}](${chartUrl})** : ${stock.price.toLocaleString()}${currency} ${extraText}`;
         });
 
         // 💡 2. 만들어진 여러 줄의 텍스트를 엔터(\n)로 묶어서 하나의 본문으로 합칩니다.
