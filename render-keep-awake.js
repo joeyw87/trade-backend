@@ -2,13 +2,15 @@
 // 본인의 Render 서버 주소 중 아무 종목이나 하나 넣습니다.
 const TARGET_URL = 'https://trade-backend-3o2e.onrender.com/api/yahoo?ticker=005930.KS';
 const ENVEL_URL = 'https://trade-backend-3o2e.onrender.com/api/kis/envelope?marketType=ALL';
+const CLOSE_BET_URL = 'https://trade-backend-3o2e.onrender.com/api/kis/closing-bet?marketType=ALL';
+
 
 // 14분(밀리초 단위) 설정: 14 * 60초 * 1000밀리초
 const INTERVAL_MS = 14 * 60 * 1000;         // 14분 (서버 찌르기용)
 
 console.log(`🚀 Render 서버 무한 동력 스크립트 가동`);
 console.log(`- 찌르기 주기: 14분`);
-console.log(`- 엔벨 스캔 주기: 8:30, 9:00, 15:00\n`);
+console.log(`- 디스코드 알림 주기 타이머 \n`);
 
 // ════════════════════════════════════════════════════════
 // 1. 14분마다 한 번씩 실행되는 Render 서버 깨우기 타이머
@@ -31,12 +33,28 @@ setInterval(async () => {
 // ════════════════════════════════════════════════════════
 // 2. 디스코드로 엔벨 알림 보내는 타이머 (8:30, 9:00, 15:00)
 // ════════════════════════════════════════════════════════
-async function sendDiscordHeartbeat() {
+async function sendDiscordHeartbeat(currentTime) {
     try {
-        const response = await fetch(ENVEL_URL); 
+        let response;
+        let strategyName = "";
+        if(currentTime === '15:05' || currentTime === '23:18'){
+            response = await fetch(CLOSE_BET_URL); 
+            strategyName = "종가베팅";
+        }else{
+            response = await fetch(ENVEL_URL); 
+            strategyName = "엔벨로프";
+        }
+
         const time = new Date().toLocaleTimeString();
         
         if (response.ok) {
+            const data = await response.json();
+            console.log(`[${time}] ${strategyName} 조회 완료! (포착 종목 수: ${data.candidates ? data.candidates.length : 0}개)`);
+
+            if (data.candidates && data.candidates.length > 0) {
+                await discordService.sendDiscordMessage(strategyName, data.candidates);
+            }
+
             console.log(`[${time}] 엔벨로프 조회 완료! (상태: ${response.status})`);
         } else {
             console.log(`[${time}] 엔벨로프 호출 시도 했으나 서버 상태가 이상합니다. (상태: ${response.status})`);
@@ -62,23 +80,25 @@ setInterval(() => {
     // 1. 주말(토=6, 일=0)에는 시계를 봐도 아무것도 안 하고 패스!
     if (day === 0 || day === 6) return;
 
-    // 2. 현재 시간을 "시:분" 형태로 만듭니다. (예: "8:30", "9:0", "15:0")
-    const currentTime = `${hour}:${minute}`;
+    const formattedHour = String(hour).padStart(2, '0');
+    const formattedMinute = String(minute).padStart(2, '0');
+    const currentTime = `${formattedHour}:${formattedMinute}`; // 예: 9시 5분 -> "09:05"
 
     // 3. 만약 방금 알림을 보낸 시간이라면 무시합니다. (1분 내내 쏘는 것 방지)
     if (lastSentTime === currentTime) return;
 
     // 4. 🎯 우리가 약속한 시간인지 확인합니다!
     const isTargetTime = (
-        currentTime === "8:30" || 
-        currentTime === "9:0" || 
-        currentTime === "15:0"
+        currentTime === "08:30" || 
+        currentTime === "09:00" || 
+        currentTime === "15:00" || 
+        currentTime === "15:05" || currentTime === "23:18"
     );
 
     if (isTargetTime) {
         lastSentTime = currentTime; // "나 방금 8시 30분 알림 보냈어!" 하고 기록
         console.log(`\n⏰ [${now.toLocaleTimeString()}] 약속된 시간이 되었습니다. 장 스캔을 시작합니다!`);
         
-        sendDiscordHeartbeat(); // 스캔 및 디스코드 발송 지시!
+        sendDiscordHeartbeat(currentTime); // 스캔 및 디스코드 발송 지시!
     }
 }, 30 * 1000); // 30초(30,000ms)마다 시계 확인

@@ -86,11 +86,6 @@ router.get('/envelope', async (req, res) => {
         // KOSPI, KOSDAQ, ALL 중 선택 가능 (기본값 ALL)
         const marketType = req.query.marketType || 'ALL'; 
         const result = await kisService.getEnvelopeBetList(marketType);
-
-        // 💡 1. 종목이 1개라도 포착되었다면 디스코드로 쏜다!
-        if (result.candidates && result.candidates.length > 0) {
-            await discordService.sendDiscordMessage('엔벨로프 하한선', result.candidates);
-        }
         
         res.json({
             success: true,

@@ -1,12 +1,12 @@
 const axios = require('axios');
 
 async function sendDiscordMessage(strategyName, candidates) {
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    const isEnvelope = strategyName.includes('엔벨로프');
+    const webhookUrl = isEnvelope ? process.env.DISCORD_WEBHOOK_URL : process.env.DISCORD_WEBHOOK_CLOSEBET_URL;
     
     if (!webhookUrl || candidates.length === 0) return;
 
     try {
-        const isEnvelope = strategyName.includes('엔벨로프');
         const cardColor = isEnvelope ? 16711680 : 65280; 
         const icon = isEnvelope ? '🩸' : '🔥'; 
 
@@ -38,7 +38,7 @@ async function sendDiscordMessage(strategyName, candidates) {
 
         // 💡 3. 단일 카드로 예쁘게 포장합니다.
         const embed = {
-            title: `${icon} [${strategyName}] 주도주 포착 (총 ${candidates.length}건)`,
+            title: `${icon} [${strategyName}] 종목 포착 (총 ${candidates.length}건)`,
             description: descriptionString,
             color: cardColor,
             footer: { text: '종목 이름을 터치하면 차트로 이동합니다.' },
