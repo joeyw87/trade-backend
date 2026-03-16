@@ -163,7 +163,8 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
 
                 // 시가총액 계산 (현재가 * 상장주식수)
                 const totalPrice = price * stock.listedShares; 
-                const MIN_TOTAL_PRICE = 100000000000; // 기준선: 1,000억 원
+                //const MIN_TOTAL_PRICE = 100000000000; // 기준선: 1,000억 원
+                const MIN_TOTAL_PRICE = 50000000000; //500억
 
                 // 💡 [전략 1] 종가베팅: 윗꼬리가 짧고(80% 이상) && 1,000억 이상
                 const isClosingBet = positionRatio > 0.8 && totalPrice >= MIN_TOTAL_PRICE;
