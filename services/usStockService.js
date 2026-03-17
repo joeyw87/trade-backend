@@ -1,5 +1,5 @@
 const YahooFinance = require('yahoo-finance2').default;
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -137,8 +137,8 @@ async function getUsEnvelopeBetList() {
                 }
                 const ma20 = sum / 20;
 
-                // 엔벨로프 하한선 계산 (20일선의 -4%)
-                const envelopeRate = 0.04;
+                // 엔벨로프 하한선 계산 (20일선의 -10%, 미국주식 변동성 반영)
+                const envelopeRate = 0.10;
                 const lowerBand = ma20 * (1 - envelopeRate);
 
                 const currentPrice = stock.price;
