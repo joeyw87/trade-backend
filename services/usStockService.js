@@ -120,15 +120,18 @@ async function getUsEnvelopeBetList() {
             const startDate = new Date();
             startDate.setDate(startDate.getDate() - 45); // 여유있게 45일치 요청
 
-            const historicalData = await yahooFinance.historical(stock.ticker, {
+            const chartResult = await yahooFinance.chart(stock.ticker, {
                 period1: startDate,
                 period2: endDate,
                 interval: '1d'
             });
 
-            if (historicalData && historicalData.length >= 20) {
+            // 장 중 당일 캔들은 close가 null일 수 있으므로 유효한 데이터만 사용
+            const validData = chartResult?.quotes ? chartResult.quotes.filter(d => d.close !== null) : [];
+
+            if (validData.length >= 20) {
                 // 가장 최근 날짜 기준으로 정렬 (내림차순)
-                const sorted = [...historicalData].sort((a, b) => new Date(b.date) - new Date(a.date));
+                const sorted = [...validData].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                 // 20일 이동평균선 계산
                 let sum = 0;
