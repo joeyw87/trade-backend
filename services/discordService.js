@@ -43,10 +43,13 @@ async function sendDiscordMessage(strategyName, candidates) {
                 }
             }
 
+            const displayName = stock.name ? `${stock.name} (${stock.ticker})` : stock.ticker;
+
             // 🔹 출력 포맷 
             // 엔벨로프: "1. [삼성전자](링크) : 75,000원 (📉 이격 -4.2%)"
             // 종가베팅: "1. [SK하이닉스](링크) : 150,000원 (🎯 조건돌파)"
-            return `**${index + 1}. [${stock.name || stock.ticker}](${chartUrl})** : ${stock.price.toLocaleString()}${currency} ${extraText}`;
+            // 🔹 출력 포맷 수정! [stock.name || stock.ticker] 부분을 [displayName]으로 교체했습니다.
+            return `**${index + 1}. [${displayName}](${chartUrl})** : ${stock.price.toLocaleString()}${currency} ${extraText}`;
         });
 
         // 💡 2. 만들어진 여러 줄의 텍스트를 엔터(\n)로 묶어서 하나의 본문으로 합칩니다.
