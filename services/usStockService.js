@@ -134,9 +134,12 @@ async function getUsEnvelopeBetList() {
                 const sorted = [...validData].sort((a, b) => new Date(b.date) - new Date(a.date));
 
                 // 20일 이동평균선 계산
+                // 단순 종가(close)가 아니라, 액면분할과 배당락이 모두 반영된 **수정주가(adjclose)**를 사용해야.. (반드시 '수정주가' 사용!)
                 let sum = 0;
                 for (let i = 0; i < 20; i++) {
-                    sum += sorted[i].close;
+                    // adjclose가 있으면 쓰고, 없으면 close를 쓰는 안전장치
+                    const priceToUse = sorted[i].adjclose ? sorted[i].adjclose : sorted[i].close;
+                    sum += priceToUse;
                 }
                 const ma20 = sum / 20;
 
@@ -147,10 +150,10 @@ async function getUsEnvelopeBetList() {
                 const currentPrice = stock.price;
                 const marketCap = stock.marketCap;
 
-                // 기준선: 시총 10억 달러 이상
-                const MIN_US_MARKET_CAP = 1000000000;
+                // 기준선: 시총 6억 달러 이상 (9천억 정도)
+                const MIN_US_MARKET_CAP = 600000000;
 
-                if (currentPrice <= lowerBand && marketCap >= MIN_US_MARKET_CAP) {
+                if (marketCap && currentPrice <= lowerBand && marketCap >= MIN_US_MARKET_CAP) {
                     const billion = Math.floor(marketCap / 1000000000);
                     const formattedTotalPrice = billion > 0
                         ? `$${billion}B`
