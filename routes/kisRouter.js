@@ -131,8 +131,9 @@ router.get('/us-envelope', async (req, res) => {
             ...result
         });
     } catch (error) {
-        console.error("KIS 미국 엔벨로프 라우터 에러:", error.message);
-        res.status(500).json({ success: false, error: 'KIS 미국 주식 엔벨로프 스캔 중 오류가 발생했습니다.' });
+        const kisMsg = error.response?.data?.msg1 || error.message;
+        console.error("KIS 미국 엔벨로프 라우터 에러:", kisMsg);
+        res.status(500).json({ success: false, error: kisMsg });
     }
 });
 
