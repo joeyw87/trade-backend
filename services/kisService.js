@@ -312,35 +312,23 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
 }
 
 // ════════════════════════════════════════════════════════
-// [미국주식 내부 함수] KIS 해외주식 거래량 상위 종목 가져오기
-// TR_ID: FHKST03030300 (해외주식 거래량 순위)
-// EXCD: NASD(나스닥), NYSE(뉴욕), AMEX(아멕스)
+// [미국주식 내부 함수] 시가총액 상위 미국 주요 종목 고정 리스트
+// KIS 해외주식 API는 거래량 순위 스크리너를 제공하지 않으므로
+// 시총 상위 종목을 기반으로 KIS API에서 실시간 가격/일봉을 조회합니다.
 // ════════════════════════════════════════════════════════
-async function getUsTopVolumeListByKis(excd = 'NASD', count = 30) {
-    const token = await getKisAccessToken();
+const US_WATCH_LIST = require('../data/usWatchList');
 
-    const response = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/volume-rank`, {
-        headers: getKisHeaders(token, 'FHKST03030300'),
-        params: {
-            AUTH: '',
-            EXCD: excd,
-            KEYB: ''
-        }
-    });
-
-    const rawData = response.data.output;
-    if (!rawData || rawData.length === 0) return [];
-
-    return rawData.slice(0, count).map((stock, index) => ({
+async function getUsTopVolumeListByKis() {
+    return US_WATCH_LIST.map((stock, index) => ({
         rank: index + 1,
-        ticker: stock.symb,
+        ticker: stock.ticker,
         name: stock.name,
         marketType: 'US',
-        excd: excd,
-        price: Number(stock.last),
-        changeRate: Number(stock.rate),
-        volume: Number(stock.tvol),
-        marketCap: Number(stock.mcap)
+        excd: stock.excd,
+        price: 0,       // 이후 개별 조회에서 채워짐
+        changeRate: 0,
+        volume: 0,
+        marketCap: 0
     }));
 }
 
