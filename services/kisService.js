@@ -318,8 +318,8 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
 // ════════════════════════════════════════════════════════
 const US_WATCH_LIST = require('../data/usWatchList');
 
-async function getUsTopVolumeListByKis() {
-    return US_WATCH_LIST.map((stock, index) => ({
+async function getUsTopVolumeListByKis(limit = 50) {
+    return US_WATCH_LIST.slice(0, limit).map((stock, index) => ({
         rank: index + 1,
         ticker: stock.ticker,
         name: stock.name,
@@ -346,8 +346,8 @@ async function getUsClosingBetListByKis() {
 
     for (const stock of topStocks) {
         try {
-            // 해외주식 현재가 상세 (TR_ID: HHDFS00000300)
-            const detailRes = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/price-detail`, {
+            // 해외주식 현재가 (TR_ID: HHDFS00000300)
+            const detailRes = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/price`, {
                 headers: getKisHeaders(token, 'HHDFS00000300'),
                 params: {
                     AUTH: '',
@@ -427,7 +427,7 @@ async function getUsEnvelopeBetListByKis() {
             const today = new Date();
             const bymd = today.toISOString().slice(0, 10).replace(/-/g, '');
 
-            const chartRes = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/dailychartprice`, {
+            const chartRes = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/daily-chartprice`, {
                 headers: getKisHeaders(token, 'HHDFS76200100'),
                 params: {
                     AUTH: '',
