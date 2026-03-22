@@ -311,8 +311,203 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
     };
 }
 
+// ════════════════════════════════════════════════════════
+// [미국주식 내부 함수] KIS 해외주식 거래량 상위 종목 가져오기
+// TR_ID: FHKST03030300 (해외주식 거래량 순위)
+// EXCD: NASD(나스닥), NYSE(뉴욕), AMEX(아멕스)
+// ════════════════════════════════════════════════════════
+async function getUsTopVolumeListByKis(excd = 'NASD', count = 30) {
+    const token = await getKisAccessToken();
+
+    const response = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/volume-rank`, {
+        headers: getKisHeaders(token, 'FHKST03030300'),
+        params: {
+            AUTH: '',
+            EXCD: excd,
+            KEYB: ''
+        }
+    });
+
+    const rawData = response.data.output;
+    if (!rawData || rawData.length === 0) return [];
+
+    return rawData.slice(0, count).map((stock, index) => ({
+        rank: index + 1,
+        ticker: stock.symb,
+        name: stock.name,
+        marketType: 'US',
+        excd: excd,
+        price: Number(stock.last),
+        changeRate: Number(stock.rate),
+        volume: Number(stock.tvol),
+        marketCap: Number(stock.mcap)
+    }));
+}
+
+// ════════════════════════════════════════════════════════
+// [미국주식 서비스 1] KIS 미국주식 종가베팅 & 신고가 필터링
+// ════════════════════════════════════════════════════════
+async function getUsClosingBetListByKis() {
+    console.log('👀 [DEBUG] KIS 미국 주식 종가베팅 스캔 시작...');
+    const token = await getKisAccessToken();
+
+    // 나스닥 + 뉴욕 합산
+    const nasdaqStocks = await getUsTopVolumeListByKis('NASD', 20);
+    await delay(500);
+    const nyseStocks = await getUsTopVolumeListByKis('NYSE', 10);
+
+    const topStocks = [...nasdaqStocks, ...nyseStocks];
+    const candidates = [];
+
+    if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };
+
+    for (const stock of topStocks) {
+        try {
+            // 해외주식 현재가 상세 (TR_ID: HHDFS00000300)
+            const detailRes = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/price-detail`, {
+                headers: getKisHeaders(token, 'HHDFS00000300'),
+                params: {
+                    AUTH: '',
+                    EXCD: stock.excd,
+                    SYMB: stock.ticker
+                }
+            });
+
+            const detail = detailRes.data.output;
+            if (detail) {
+                const price = Number(detail.last);
+                const highPrice = Number(detail.high);
+                const lowPrice = Number(detail.low);
+                const w52HighPrice = Number(detail.h52p);
+                const marketCap = Number(detail.mcap);
+
+                let positionRatio = 0;
+                if (highPrice !== lowPrice) {
+                    positionRatio = (price - lowPrice) / (highPrice - lowPrice);
+                } else if (Number(detail.rate) > 0) {
+                    positionRatio = 1;
+                }
+
+                const MIN_US_MARKET_CAP = 100000000; // $1억
+                const isClosingBet = positionRatio > 0.8 && marketCap >= MIN_US_MARKET_CAP;
+                const isNewHighBreakout = price >= w52HighPrice && marketCap >= MIN_US_MARKET_CAP;
+
+                if (isClosingBet || isNewHighBreakout) {
+                    const billion = Math.floor(marketCap / 1000000000);
+                    const formattedTotalPrice = billion > 0
+                        ? `$${billion}B`
+                        : `$${Math.floor(marketCap / 1000000)}M`;
+
+                    candidates.push({
+                        ...stock,
+                        price,
+                        highPrice,
+                        lowPrice,
+                        positionRatioPercent: (positionRatio * 100).toFixed(1),
+                        totalPrice: marketCap,
+                        totalPriceFormatted: formattedTotalPrice,
+                        dataFg: isNewHighBreakout ? '신고가돌파' : '종가베팅',
+                        w52HighPrice
+                    });
+                }
+            }
+
+            await delay(500);
+        } catch (err) {
+            const kisErrorMsg = err.response?.data?.msg1 || err.message;
+            console.error(`[${stock.ticker}] KIS 미국 종가베팅 상세 조회 실패:`, kisErrorMsg);
+        }
+    }
+
+    console.log(`✅ [DEBUG] KIS 미국 주식 종가베팅 스캔 완료 (후보: ${candidates.length}건)`);
+    return { totalScanned: topStocks.length, totalScanList: topStocks, candidates };
+}
+
+// ════════════════════════════════════════════════════════
+// [미국주식 서비스 2] KIS 미국주식 엔벨로프 하한선 필터링
+// MA20 기준 -10% 이하 낙폭과대 종목 포착
+// ════════════════════════════════════════════════════════
+async function getUsEnvelopeBetListByKis() {
+    console.log('👀 [DEBUG] KIS 미국 주식 엔벨로프 스캔 시작...');
+    const token = await getKisAccessToken();
+
+    const nasdaqStocks = await getUsTopVolumeListByKis('NASD', 20);
+    await delay(500);
+    const nyseStocks = await getUsTopVolumeListByKis('NYSE', 10);
+
+    const topStocks = [...nasdaqStocks, ...nyseStocks];
+    const candidates = [];
+
+    if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };
+
+    console.log(`👀 [DEBUG] 총 ${topStocks.length}건 스캔 중...`);
+
+    for (const stock of topStocks) {
+        try {
+            // 해외주식 기간별 시세 (TR_ID: HHDFS76200100)
+            const today = new Date();
+            const bymd = today.toISOString().slice(0, 10).replace(/-/g, '');
+
+            const chartRes = await axios.get(`${KIS_DOMAIN}/uapi/overseas-price/v1/quotations/dailychartprice`, {
+                headers: getKisHeaders(token, 'HHDFS76200100'),
+                params: {
+                    AUTH: '',
+                    EXCD: stock.excd,
+                    SYMB: stock.ticker,
+                    GUBN: '0',   // 0: 일봉
+                    BYMD: bymd,
+                    MODP: '1'    // 1: 수정주가
+                }
+            });
+
+            const dailyData = chartRes.data.output2; // 일봉 배열
+            if (dailyData && dailyData.length >= 20) {
+                // 수정주가(clos) 기준 MA20 계산
+                let sum = 0;
+                for (let i = 0; i < 20; i++) {
+                    sum += Number(dailyData[i].clos);
+                }
+                const ma20 = sum / 20;
+
+                const envelopeRate = 0.10; // -10%
+                const lowerBand = ma20 * (1 - envelopeRate);
+
+                const currentPrice = stock.price;
+                const marketCap = stock.marketCap;
+                const MIN_US_MARKET_CAP = 600000000; // $6억
+
+                if (marketCap && currentPrice <= lowerBand && marketCap >= MIN_US_MARKET_CAP) {
+                    const billion = Math.floor(marketCap / 1000000000);
+                    const formattedTotalPrice = billion > 0
+                        ? `$${billion}B`
+                        : `$${Math.floor(marketCap / 1000000)}M`;
+
+                    candidates.push({
+                        ...stock,
+                        ma20: parseFloat(ma20.toFixed(2)),
+                        lowerBand: parseFloat(lowerBand.toFixed(2)),
+                        totalPriceFormatted: formattedTotalPrice,
+                        gapFromLowerBand: (((currentPrice / lowerBand) - 1) * 100).toFixed(2),
+                        dataFg: '엔벨하한'
+                    });
+                }
+            }
+
+            await delay(300);
+        } catch (err) {
+            const kisErrorMsg = err.response?.data?.msg1 || err.message;
+            console.error(`[${stock.ticker}] KIS 미국 엔벨로프 조회 실패:`, kisErrorMsg);
+        }
+    }
+
+    console.log(`✅ [DEBUG] KIS 미국 주식 엔벨로프 스캔 완료 (후보: ${candidates.length}건)`);
+    return { totalScanned: topStocks.length, totalScanList: topStocks, candidates };
+}
+
 module.exports = {
     getTopVolumeList,
     getClosingBetList,
-    getEnvelopeBetList
+    getEnvelopeBetList,
+    getUsClosingBetListByKis,
+    getUsEnvelopeBetListByKis
 };

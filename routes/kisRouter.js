@@ -98,4 +98,42 @@ router.get('/envelope', async (req, res) => {
     }
 });
 
+// ════════════════════════════════════════════════════════
+// [미국주식 API 1] KIS 미국주식 종가베팅 & 신고가 검색
+// GET /api/kis/us-closing-bet
+// ════════════════════════════════════════════════════════
+router.get('/us-closing-bet', async (req, res) => {
+    try {
+        const result = await kisService.getUsClosingBetListByKis();
+        res.json({
+            success: true,
+            totalScanned: result.totalScanned,
+            totalScanList: result.totalScanList,
+            count: result.candidates.length,
+            candidates: result.candidates
+        });
+    } catch (error) {
+        console.error("KIS 미국 종가베팅 라우터 에러:", error.message);
+        res.status(500).json({ success: false, error: 'KIS 미국 주식 종가베팅 분석 중 오류가 발생했습니다.' });
+    }
+});
+
+// ════════════════════════════════════════════════════════
+// [미국주식 API 2] KIS 미국주식 엔벨로프 하한선 검색
+// GET /api/kis/us-envelope
+// ════════════════════════════════════════════════════════
+router.get('/us-envelope', async (req, res) => {
+    try {
+        const result = await kisService.getUsEnvelopeBetListByKis();
+        res.json({
+            success: true,
+            count: result.candidates.length,
+            ...result
+        });
+    } catch (error) {
+        console.error("KIS 미국 엔벨로프 라우터 에러:", error.message);
+        res.status(500).json({ success: false, error: 'KIS 미국 주식 엔벨로프 스캔 중 오류가 발생했습니다.' });
+    }
+});
+
 module.exports = router;
