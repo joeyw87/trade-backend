@@ -11,50 +11,50 @@ async function sendDiscordMessage(strategyName, candidates) {
         const cardColor = isEnvelope ? 16711680 : 65280; 
         const icon = isEnvelope ? '🩸' : '🔥'; 
 
-        // 💡 1. 각각의 종목을 한 줄짜리 깔끔한 텍스트로 압축합니다.
-        const stockLines = candidates.map((stock, index) => {
+        // 💡 1. 종목 한 줄 텍스트 생성 함수
+        const toLine = (stock, index) => {
             const isUS = stock.marketType === 'US';
             const currency = isUS ? '$' : '원';
-            
-            // 이름 클릭 시 바로 차트로 이동하는 링크
-            const chartUrl = isUS 
-                ? `https://finance.yahoo.com/quote/${stock.ticker}` 
-                : `https://finance.naver.com/item/main.naver?code=${stock.ticker}`; 
+            const chartUrl = isUS
+                ? `https://finance.yahoo.com/quote/${stock.ticker}`
+                : `https://finance.naver.com/item/main.naver?code=${stock.ticker}`;
 
-            // 점수 또는 괴리율 텍스트 세팅
             let extraText = '';
-            
             if (isEnvelope) {
                 // 🩸 엔벨로프 전략일 때
-                if (stock.score) {
-                    extraText = `(💯 ${stock.score}점)`;
-                } else if (stock.gapFromLowerBand) {
-                    extraText = `(📉 이격 ${stock.gapFromLowerBand}%)`;
-                } else {
-                    extraText = `(🩸 낙폭과대)`;
-                }
+                if (stock.score)                extraText = `(💯 ${stock.score}점)`;
+                else if (stock.gapFromLowerBand) extraText = `(📉 이격 ${stock.gapFromLowerBand}%)`;
+                else                             extraText = `(🩸 낙폭과대)`;
             } else {
                 // 🔥 종가베팅 전략일 때 (점수가 없으므로 돌파 포착 문구로 대체)
-                // 만약 나중에 백엔드에서 stock.changeRate(등락률)을 넘겨준다면 `(🔥 +5.2%)` 처럼 쓸 수도 있습니다!
-                if (stock.changeRate) {
-                    extraText = `(🔥 ${stock.changeRate > 0 ? '+' : ''}${stock.changeRate}%)`;
-                } else {
-                    extraText = `(🎯 조건돌파)`;
-                }
+                if (stock.changeRate) extraText = `(🔥 ${stock.changeRate > 0 ? '+' : ''}${stock.changeRate}%)`;
+                else                  extraText = `(🎯 조건돌파)`;
             }
 
             const displayName = stock.name ? `${stock.name} (${stock.ticker})` : stock.ticker;
-
-            // 🔹 출력 포맷 
-            // 엔벨로프: "1. [삼성전자](링크) : 75,000원 (📉 이격 -4.2%)"
-            // 종가베팅: "1. [SK하이닉스](링크) : 150,000원 (🎯 조건돌파)"
-            // 🔹 출력 포맷 수정! [stock.name || stock.ticker] 부분을 [displayName]으로 교체했습니다.
             return `**${index + 1}. [${displayName}](${chartUrl})** : ${stock.price.toLocaleString()}${currency} ${extraText}`;
-        });
+        };
 
-        // 💡 2. 만들어진 여러 줄의 텍스트를 엔터(\n)로 묶어서 하나의 본문으로 합칩니다.
-        // 종목이 너무 많아서 디스코드 본문 글자 수 제한(4096자)을 넘을 경우를 대비해 30개까지만 자릅니다.
-        const descriptionString = stockLines.slice(0, 30).join('\n\n');
+        // 💡 2. 종가베팅은 dataFg(종가베팅/신고가돌파)로 구분, 엔벨로프는 그대로
+        let descriptionString = '';
+        if (isEnvelope) {
+            descriptionString = candidates.slice(0, 30).map(toLine).join('\n\n');
+        } else {
+            const closingBets  = candidates.filter(s => s.dataFg !== '신고가돌파');
+            const newHighBreaks = candidates.filter(s => s.dataFg === '신고가돌파');
+
+            const parts = [];
+            if (closingBets.length > 0) {
+                parts.push(`🔥 **종가베팅** (${closingBets.length}건)`);
+                parts.push(closingBets.slice(0, 15).map(toLine).join('\n\n'));
+            }
+            if (newHighBreaks.length > 0) {
+                if (parts.length > 0) parts.push('');
+                parts.push(`🚀 **신고가돌파** (${newHighBreaks.length}건)`);
+                parts.push(newHighBreaks.slice(0, 15).map(toLine).join('\n\n'));
+            }
+            descriptionString = parts.join('\n');
+        }
 
         // 💡 3. 단일 카드로 예쁘게 포장합니다.
         const embed = {
