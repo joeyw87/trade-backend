@@ -339,12 +339,7 @@ async function getUsClosingBetListByKis() {
     console.log('👀 [DEBUG] KIS 미국 주식 종가베팅 스캔 시작...');
     const token = await getKisAccessToken();
 
-    // 나스닥 + 뉴욕 합산
-    const nasdaqStocks = await getUsTopVolumeListByKis('NASD', 20);
-    await delay(500);
-    const nyseStocks = await getUsTopVolumeListByKis('NYSE', 10);
-
-    const topStocks = [...nasdaqStocks, ...nyseStocks];
+    const topStocks = await getUsTopVolumeListByKis();
     const candidates = [];
 
     if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };
@@ -419,11 +414,7 @@ async function getUsEnvelopeBetListByKis() {
     console.log('👀 [DEBUG] KIS 미국 주식 엔벨로프 스캔 시작...');
     const token = await getKisAccessToken();
 
-    const nasdaqStocks = await getUsTopVolumeListByKis('NASD', 20);
-    await delay(500);
-    const nyseStocks = await getUsTopVolumeListByKis('NYSE', 10);
-
-    const topStocks = [...nasdaqStocks, ...nyseStocks];
+    const topStocks = await getUsTopVolumeListByKis();
     const candidates = [];
 
     if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };
@@ -448,7 +439,10 @@ async function getUsEnvelopeBetListByKis() {
                 }
             });
 
-            const dailyData = chartRes.data.output2; // 일봉 배열
+            // output1: 종목 요약(현재가, 시총 등), output2: 일봉 배열
+            const summary = chartRes.data.output1;
+            const dailyData = chartRes.data.output2;
+
             if (dailyData && dailyData.length >= 20) {
                 // 수정주가(clos) 기준 MA20 계산
                 let sum = 0;
@@ -460,18 +454,19 @@ async function getUsEnvelopeBetListByKis() {
                 const envelopeRate = 0.10; // -10%
                 const lowerBand = ma20 * (1 - envelopeRate);
 
-                const currentPrice = stock.price;
-                const marketCap = stock.marketCap;
-                const MIN_US_MARKET_CAP = 600000000; // $6억
+                // output1에서 현재가 추출, 없으면 가장 최신 일봉 종가 사용
+                const currentPrice = summary?.last ? Number(summary.last) : Number(dailyData[0].clos);
 
-                if (marketCap && currentPrice <= lowerBand && marketCap >= MIN_US_MARKET_CAP) {
+                if (currentPrice > 0 && currentPrice <= lowerBand) {
+                    const marketCap = summary?.mcap ? Number(summary.mcap) : 0;
                     const billion = Math.floor(marketCap / 1000000000);
-                    const formattedTotalPrice = billion > 0
-                        ? `$${billion}B`
-                        : `$${Math.floor(marketCap / 1000000)}M`;
+                    const formattedTotalPrice = marketCap > 0
+                        ? (billion > 0 ? `$${billion}B` : `$${Math.floor(marketCap / 1000000)}M`)
+                        : 'N/A';
 
                     candidates.push({
                         ...stock,
+                        price: currentPrice,
                         ma20: parseFloat(ma20.toFixed(2)),
                         lowerBand: parseFloat(lowerBand.toFixed(2)),
                         totalPriceFormatted: formattedTotalPrice,
