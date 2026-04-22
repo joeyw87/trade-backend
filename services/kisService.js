@@ -55,7 +55,19 @@ async function getTopVolumeList(marketType = 'ALL', exclCode = '111111111') {
         console.log('=================================================');
     }
 
-    const response = await axios.get(`${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/volume-rank`, requestParam);
+    let response;
+    try {
+        response = await axios.get(`${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/volume-rank`, requestParam);
+    } catch (err) {
+        const kisMsg = err.response?.data?.msg1 || err.message;
+        const status = err.response?.status;
+        if (status === 500) {
+            console.warn(`⚠️ [거래대금순위] ${marketType} 조회 실패 (500) - 장 마감 후에는 조회 불가: ${kisMsg}`);
+        } else {
+            console.error(`❌ [거래대금순위] ${marketType} 조회 실패 (${status}): ${kisMsg}`);
+        }
+        return [];
+    }
     const rawData = response.data.output;
 
     if (process.env.DEBUG_MODE === 'true') {

@@ -238,8 +238,8 @@ client.on('messageCreate', async (message) => {
     };
 
     // 2. 명령어 분기 처리 + 도움말
-    if (command === '!국내엔벨') {
-        console.log(`[${time}] 유저 명령 수신: !국내엔벨`);
+    if (command.startsWith('!국내엔벨')) {
+        console.log(`[${time}] 유저 명령 수신: ${command}`);
         await message.reply('🔎 넵! 즉시 [🇰🇷 국내 주식 엔벨로프 낙주] 타점을 스캔해 오겠습니다. (약 3~5초 소요)');
         await sendDiscordHeartbeat('KR_ENVEL');
 
@@ -249,8 +249,8 @@ client.on('messageCreate', async (message) => {
         await message.reply(`🦅 [🇺🇸 미국 주식 엔벨로프] ${limit}개 종목 스캔 시작합니다. (약 ${Math.ceil(limit * 1.5 / 60)}~${Math.ceil(limit * 2 / 60)}분 소요)`);
         await sendDiscordHeartbeat('US_ENVEL', limit);
 
-    } else if (command === '!국내종가') {
-        console.log(`[${time}] 유저 명령 수신: !국내종가`);
+    } else if (command.startsWith('!국내종가')) {
+        console.log(`[${time}] 유저 명령 수신: ${command}`);
         await message.reply('🌙 [🇰🇷 국내 주식 종가베팅] 타점을 긁어오는 중입니다...');
         await sendDiscordHeartbeat('KR_CLOSE_BET');
 
