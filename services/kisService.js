@@ -385,7 +385,12 @@ async function getUsClosingBetListByKis(limit = 200) {
                     positionRatio = 1;
                 }
 
-                const MIN_US_MARKET_CAP = 100000000; // $1억
+                // 첫 3개 종목만 상세 로그 출력 (mcap 단위 확인용)
+                if (candidates.length === 0 && topStocks.indexOf(stock) < 3) {
+                    console.log(`  [DEBUG] ${stock.ticker}: price=${price}, high=${highPrice}, low=${lowPrice}, posRatio=${positionRatio.toFixed(2)}, w52H=${w52HighPrice}, mcap=${marketCap} (raw: "${detail.mcap}")`);
+                }
+
+                const MIN_US_MARKET_CAP = 100000000; // $1억 (단위: 달러 기준)
                 const isClosingBet = positionRatio > 0.8 && marketCap >= MIN_US_MARKET_CAP;
                 const isNewHighBreakout = price >= w52HighPrice && marketCap >= MIN_US_MARKET_CAP;
 
