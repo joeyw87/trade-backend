@@ -3,12 +3,16 @@ require('dotenv').config();
 
 async function sendDiscordMessage(strategyName, candidates) {
     const isEnvelope = strategyName.includes('엔벨로프');
-    const webhookUrl = isEnvelope ? process.env.DISCORD_WEBHOOK_URL : process.env.DISCORD_WEBHOOK_CLOSEBET_URL;
+    const isRSI = strategyName.includes('RSI');
+
+    let webhookUrl;
+    if (isRSI)          webhookUrl = process.env.DISCORD_WEBHOOK_RSI_URL;
+    else if (isEnvelope) webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    else                 webhookUrl = process.env.DISCORD_WEBHOOK_CLOSEBET_URL;
     
     if (!webhookUrl || candidates.length === 0) return;
 
     try {
-        const isRSI = strategyName.includes('RSI');
         const cardColor = isEnvelope ? 16711680 : isRSI ? 16744192 : 65280;
         const icon = isEnvelope ? '🩸' : isRSI ? '📊' : '🔥';
 
