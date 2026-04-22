@@ -337,11 +337,11 @@ async function getUsTopVolumeListByKis(limit = 200) {
 // ════════════════════════════════════════════════════════
 // [미국주식 서비스 1] KIS 미국주식 종가베팅 & 신고가 필터링
 // ════════════════════════════════════════════════════════
-async function getUsClosingBetListByKis() {
-    console.log('👀 [DEBUG] KIS 미국 주식 종가베팅 스캔 시작...');
+async function getUsClosingBetListByKis(limit = 200) {
+    console.log(`👀 [DEBUG] KIS 미국 주식 종가베팅 스캔 시작... (${limit}개)`);
     const token = await getKisAccessToken();
 
-    const topStocks = await getUsTopVolumeListByKis();
+    const topStocks = await getUsTopVolumeListByKis(limit);
     const candidates = [];
 
     if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };

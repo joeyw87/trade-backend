@@ -105,7 +105,8 @@ router.get('/envelope', async (req, res) => {
 // ════════════════════════════════════════════════════════
 router.get('/us-closing-bet', async (req, res) => {
     try {
-        const result = await kisService.getUsClosingBetListByKis();
+        const limit = Math.min(parseInt(req.query.limit) || 200, 200);
+        const result = await kisService.getUsClosingBetListByKis(limit);
         res.json({
             success: true,
             totalScanned: result.totalScanned,

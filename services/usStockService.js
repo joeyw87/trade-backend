@@ -122,10 +122,11 @@ async function getUsClosingBetList() {
 // [서비스 로직 2] 미국 주식 엔벨로프 하한선(낙폭과대) 필터링
 // 20일 이동평균선의 -4% 지점 이하로 내려온 종목 포착
 // ════════════════════════════════════════════════════════
-async function getUsEnvelopeBetList() {
-    console.log('👀 [DEBUG] 미국 주식 엔벨로프 하한선 스캔 시작...');
+async function getUsEnvelopeBetList(limit = 200) {
+    console.log(`👀 [DEBUG] 미국 주식 엔벨로프 하한선 스캔 시작... (${limit}개)`);
 
-    const topStocks = await getUsTopVolumeList();
+    const allStocks = await getUsTopVolumeList();
+    const topStocks = allStocks.slice(0, limit);
     const candidates = [];
 
     if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };

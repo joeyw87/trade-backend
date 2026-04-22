@@ -81,14 +81,14 @@ wakeUpSupabase();
 // ════════════════════════════════════════════════════════
 // 2. 디스코드 알림 발송 함수
 // ════════════════════════════════════════════════════════
-async function sendDiscordHeartbeat(strategyType) {
+async function sendDiscordHeartbeat(strategyType, limit = 200) {
     const time = new Date().toLocaleTimeString();
 
     // 🇺🇸 미국 엔벨로프: Yahoo chart() → Render에서 차단되므로 로컬 직접 호출
     if (strategyType === 'US_ENVEL') {
         try {
-            const result = await usStockService.getUsEnvelopeBetList();
-            console.log(`[${time}] 엔벨로프 (미국) 조회 완료! (포착 종목 수: ${result.candidates.length}개)`);
+            const result = await usStockService.getUsEnvelopeBetList(limit);
+            console.log(`[${time}] 엔벨로프 (미국) 조회 완료! (스캔: ${limit}개 / 포착: ${result.candidates.length}개)`);
             if (result.candidates.length > 0) {
                 await discordService.sendDiscordMessage('엔벨로프 (미국)', result.candidates);
             }
@@ -100,9 +100,9 @@ async function sendDiscordHeartbeat(strategyType) {
 
     // 나머지 전략: Render 서버 API 호출
     const strategyMap = {
-        'KR_ENVEL':     { url: KR_ENVEL_URL,     name: '엔벨로프 (국내)' },
-        'KR_CLOSE_BET': { url: KR_CLOSE_BET_URL, name: '종가베팅 (국내)' },
-        'US_CLOSE_BET': { url: US_CLOSE_BET_URL,  name: '종가베팅 (미국)' },
+        'KR_ENVEL':     { url: KR_ENVEL_URL,                              name: '엔벨로프 (국내)' },
+        'KR_CLOSE_BET': { url: KR_CLOSE_BET_URL,                          name: '종가베팅 (국내)' },
+        'US_CLOSE_BET': { url: `${US_CLOSE_BET_URL}?limit=${limit}`,      name: '종가베팅 (미국)' },
     };
 
     const strategy = strategyMap[strategyType];
@@ -227,38 +227,45 @@ client.on('messageCreate', async (message) => {
     // 1. 봇이 스스로 보낸 메시지거나, '!'로 시작하지 않는 일반 대화는 무시합니다.
     if (message.author.bot || !message.content.startsWith('!')) return;
 
-    const command = message.content;
+    const command = message.content.trim();
     const time = new Date().toLocaleTimeString();
 
-    // 2. 명령어 4개 분기 처리 + 도움말
+    // 숫자 suffix 파싱 헬퍼 (예: '!미국종가50' → limit=50, '!미국종가' → limit=200)
+    const parseLimit = (prefix) => {
+        const numStr = command.slice(prefix.length);
+        const parsed = parseInt(numStr, 10);
+        return (!numStr || isNaN(parsed) || parsed <= 0) ? 200 : Math.min(parsed, 200);
+    };
+
+    // 2. 명령어 분기 처리 + 도움말
     if (command === '!국내엔벨') {
         console.log(`[${time}] 유저 명령 수신: !국내엔벨`);
         await message.reply('🔎 넵! 즉시 [🇰🇷 국내 주식 엔벨로프 낙주] 타점을 스캔해 오겠습니다. (약 3~5초 소요)');
-        await sendDiscordHeartbeat('KR_ENVEL'); 
-        
-    } else if (command === '!미국엔벨') {
-        console.log(`[${time}] 유저 명령 수신: !미국엔벨`);
-        await message.reply('🦅 넵! 즉시 [🇺🇸 미국 주식 엔벨로프 낙주] 타점을 스캔해 오겠습니다.');
-        await sendDiscordHeartbeat('US_ENVEL'); 
-        
+        await sendDiscordHeartbeat('KR_ENVEL');
+
+    } else if (command.startsWith('!미국엔벨')) {
+        const limit = parseLimit('!미국엔벨');
+        console.log(`[${time}] 유저 명령 수신: !미국엔벨 (limit: ${limit})`);
+        await message.reply(`🦅 [🇺🇸 미국 주식 엔벨로프] ${limit}개 종목 스캔 시작합니다. (약 ${Math.ceil(limit * 1.5 / 60)}~${Math.ceil(limit * 2 / 60)}분 소요)`);
+        await sendDiscordHeartbeat('US_ENVEL', limit);
+
     } else if (command === '!국내종가') {
         console.log(`[${time}] 유저 명령 수신: !국내종가`);
         await message.reply('🌙 [🇰🇷 국내 주식 종가베팅] 타점을 긁어오는 중입니다...');
-        await sendDiscordHeartbeat('KR_CLOSE_BET'); 
-        
-    } else if (command === '!미국종가') {
-        console.log(`[${time}] 유저 명령 수신: !미국종가`);
-        await message.reply('🗽 [🇺🇸 미국 주식 종가베팅] 타점을 긁어오는 중입니다...');
-        await sendDiscordHeartbeat('US_CLOSE_BET'); 
-        
+        await sendDiscordHeartbeat('KR_CLOSE_BET');
+
+    } else if (command.startsWith('!미국종가')) {
+        const limit = parseLimit('!미국종가');
+        console.log(`[${time}] 유저 명령 수신: !미국종가 (limit: ${limit})`);
+        await message.reply(`🗽 [🇺🇸 미국 주식 종가베팅] ${limit}개 종목 스캔 시작합니다. (약 ${Math.ceil(limit * 1.1 / 60)}~${Math.ceil(limit * 1.3 / 60)}분 소요)`);
+        await sendDiscordHeartbeat('US_CLOSE_BET', limit);
+
     } else if (command === '!도움말') {
-        // 사용 가능한 명령어 리스트 안내 (깔끔하게 줄바꿈 적용)
         const helpText = `**🤖 영욱문AI비서 전술 명령어 목록**
 \`!국내엔벨\` : 🇰🇷 한국장 장중 급락 (낙주매매) 스캔
-\`!미국엔벨\` : 🇺🇸 미국장 장중 급락 (낙주매매) 스캔
+\`!미국엔벨[숫자]\` : 🇺🇸 미국장 엔벨로프 스캔 (예: \`!미국엔벨50\`, 기본값 200)
 \`!국내종가\` : 🇰🇷 한국장 마감 직전 종가베팅 스캔
-\`!미국종가\` : 🇺🇸 미국장 마감 직전 종가베팅 스캔`;
-        
+\`!미국종가[숫자]\` : 🇺🇸 미국장 종가베팅 스캔 (예: \`!미국종가100\`, 기본값 200)`;
         message.reply(helpText);
     }
 });
