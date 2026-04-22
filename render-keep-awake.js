@@ -8,9 +8,10 @@ const TARGET_URL = 'https://trade-backend-3o2e.onrender.com/api/yahoo?ticker=005
 const KR_ENVEL_URL      = 'https://trade-backend-3o2e.onrender.com/api/kis/envelope?marketType=ALL';
 const KR_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/closing-bet?marketType=ALL';
 
-// 🇺🇸 미국주식 API URL (Render 서버 KIS 라우터 사용)
-const US_ENVEL_URL      = 'https://trade-backend-3o2e.onrender.com/api/kis/us-envelope';
+// 🇺🇸 미국주식 종가베팅: Render 서버 KIS 라우터 사용
 const US_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/us-closing-bet';
+// 🇺🇸 미국주식 엔벨로프: Yahoo chart() 사용 → Render에서 차단되므로 로컬 직접 호출
+const usStockService = require('./services/usStockService');
 
 // Supabase DB정보 세팅 (7일동안 호출없으면 일시정지 되므로..)
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -83,11 +84,24 @@ wakeUpSupabase();
 async function sendDiscordHeartbeat(strategyType) {
     const time = new Date().toLocaleTimeString();
 
-    // 전략별 URL & 이름 매핑 (국내 + 미국 통합)
+    // 🇺🇸 미국 엔벨로프: Yahoo chart() → Render에서 차단되므로 로컬 직접 호출
+    if (strategyType === 'US_ENVEL') {
+        try {
+            const result = await usStockService.getUsEnvelopeBetList();
+            console.log(`[${time}] 엔벨로프 (미국) 조회 완료! (포착 종목 수: ${result.candidates.length}개)`);
+            if (result.candidates.length > 0) {
+                await discordService.sendDiscordMessage('엔벨로프 (미국)', result.candidates);
+            }
+        } catch (error) {
+            console.error(`[${time}] 엔벨로프 (미국) 로컬 실행 실패:`, error.message);
+        }
+        return;
+    }
+
+    // 나머지 전략: Render 서버 API 호출
     const strategyMap = {
         'KR_ENVEL':     { url: KR_ENVEL_URL,     name: '엔벨로프 (국내)' },
         'KR_CLOSE_BET': { url: KR_CLOSE_BET_URL, name: '종가베팅 (국내)' },
-        'US_ENVEL':     { url: US_ENVEL_URL,      name: '엔벨로프 (미국)' },
         'US_CLOSE_BET': { url: US_CLOSE_BET_URL,  name: '종가베팅 (미국)' },
     };
 

@@ -297,7 +297,7 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
             }
 
             // KIS 서버 보호용 딜레이
-            await delay(300);
+            await delay(1100);
 
         } catch (err) {
             const kisMsg = err.response?.data?.msg1 || err.response?.data?.message || err.message;
@@ -478,7 +478,7 @@ async function getUsEnvelopeBetListByKis() {
                 }
             }
 
-            await delay(300);
+            await delay(1100);
         } catch (err) {
             const kisErrorMsg = err.response?.data?.msg1 || err.message;
             console.error(`[${stock.ticker}] KIS 미국 엔벨로프 조회 실패:`, kisErrorMsg);
