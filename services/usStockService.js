@@ -4,25 +4,45 @@ const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ════════════════════════════════════════════════════════
-// [내부 함수] 미국 주식 거래량 상위 30개 가져오기
+// [내부 함수] 미국 주식 거래량 상위 종목 가져오기
+// Yahoo Finance screener API가 인증 오류를 일으키므로
+// 고정 티커 리스트로 quote 조회 방식으로 대체
 // ════════════════════════════════════════════════════════
+const US_TOP_TICKERS = [
+    'NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AVGO', 'AMD',
+    'PLTR', 'INTC', 'ORCL', 'NFLX', 'CRM', 'UBER', 'SHOP', 'SOFI', 'SMCI',
+    'ARM', 'MU', 'MRVL', 'AMAT', 'PANW', 'SNOW', 'COIN', 'RBLX', 'MSTR',
+    'SQ', 'HOOD', 'RIVN', 'LCID', 'NIO', 'BABA', 'JD', 'SNAP', 'PINS',
+    'LYFT', 'DASH', 'ABNB', 'SPOT', 'PYPL', 'AFRM', 'UPST', 'U', 'DKNG',
+    'SIRI', 'F', 'GM', 'BAC', 'C'
+];
+
 async function getUsTopVolumeList() {
     try {
-        const result = await yahooFinance.screener({ scrIds: 'most_actives', count: 30 });
-        const rawData = result.quotes;
-
-        if (!rawData || rawData.length === 0) return [];
-
-        return rawData.map((stock, index) => ({
-            rank: index + 1,
-            ticker: stock.symbol,
-            name: stock.shortName,
-            marketType: 'US',
-            price: stock.regularMarketPrice,
-            changeRate: stock.regularMarketChangePercent,
-            volume: stock.regularMarketVolume,
-            marketCap: stock.marketCap
-        }));
+        const results = [];
+        for (let i = 0; i < US_TOP_TICKERS.length; i++) {
+            const ticker = US_TOP_TICKERS[i];
+            try {
+                const quote = await yahooFinance.quote(ticker);
+                if (quote && quote.regularMarketPrice) {
+                    results.push({
+                        rank: i + 1,
+                        ticker: quote.symbol,
+                        name: quote.shortName || quote.longName || ticker,
+                        marketType: 'US',
+                        price: quote.regularMarketPrice,
+                        changeRate: quote.regularMarketChangePercent,
+                        volume: quote.regularMarketVolume,
+                        marketCap: quote.marketCap
+                    });
+                }
+            } catch (err) {
+                console.error(`[${ticker}] quote 조회 실패:`, err.message);
+            }
+            await delay(200);
+        }
+        console.log(`✅ 미국 주식 목록 조회 완료 (${results.length}건)`);
+        return results;
     } catch (err) {
         console.error("미국 주식 랭킹 조회 실패:", err.message);
         return [];
@@ -52,7 +72,7 @@ async function getUsClosingBetList() {
                 const totalPrice = quote.marketCap;
 
                 let positionRatio = 0;
-                if (highPrice !== lowPrice) {
+                if (highPrice != null && lowPrice != null && highPrice !== lowPrice) {
                     positionRatio = (price - lowPrice) / (highPrice - lowPrice);
                 } else if (quote.regularMarketChangePercent > 0) {
                     positionRatio = 1;
@@ -61,8 +81,10 @@ async function getUsClosingBetList() {
                 // 기준선: 시총 1억 달러 (약 1,300억 원)
                 const MIN_US_TOTAL_PRICE = 100000000;
 
-                const isClosingBet = positionRatio > 0.8 && totalPrice >= MIN_US_TOTAL_PRICE;
-                const isNewHighBreakout = price >= w52HighPrice && totalPrice >= MIN_US_TOTAL_PRICE;
+                console.log(`  [${stock.ticker}] price=${price}, high=${highPrice}, low=${lowPrice}, posRatio=${positionRatio.toFixed(2)}, w52H=${w52HighPrice}, mktCap=${totalPrice}`);
+
+                const isClosingBet = positionRatio > 0.8 && totalPrice != null && totalPrice >= MIN_US_TOTAL_PRICE;
+                const isNewHighBreakout = price != null && w52HighPrice != null && price >= w52HighPrice && totalPrice != null && totalPrice >= MIN_US_TOTAL_PRICE;
 
                 if (isClosingBet || isNewHighBreakout) {
                     const billion = Math.floor(totalPrice / 1000000000);

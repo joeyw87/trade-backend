@@ -8,9 +8,9 @@ const TARGET_URL = 'https://trade-backend-3o2e.onrender.com/api/yahoo?ticker=005
 const KR_ENVEL_URL      = 'https://trade-backend-3o2e.onrender.com/api/kis/envelope?marketType=ALL';
 const KR_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/closing-bet?marketType=ALL';
 
-// 🇺🇸 미국주식 API URL
-const US_ENVEL_URL      = 'https://trade-backend-3o2e.onrender.com/api/yahoo2/us-envelope';
-const US_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/yahoo2/us-closing-bet';
+// 🇺🇸 미국주식 API URL (Render 서버 KIS 라우터 사용)
+const US_ENVEL_URL      = 'https://trade-backend-3o2e.onrender.com/api/kis/us-envelope';
+const US_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/us-closing-bet';
 
 // Supabase DB정보 세팅 (7일동안 호출없으면 일시정지 되므로..)
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -81,12 +81,14 @@ wakeUpSupabase();
 // 2. 디스코드 알림 발송 함수
 // ════════════════════════════════════════════════════════
 async function sendDiscordHeartbeat(strategyType) {
-    // strategyType별 URL과 전략명 매핑
+    const time = new Date().toLocaleTimeString();
+
+    // 전략별 URL & 이름 매핑 (국내 + 미국 통합)
     const strategyMap = {
         'KR_ENVEL':     { url: KR_ENVEL_URL,     name: '엔벨로프 (국내)' },
         'KR_CLOSE_BET': { url: KR_CLOSE_BET_URL, name: '종가베팅 (국내)' },
-        'US_ENVEL':     { url: US_ENVEL_URL,     name: '엔벨로프 (미국)' },
-        'US_CLOSE_BET': { url: US_CLOSE_BET_URL, name: '종가베팅 (미국)' },
+        'US_ENVEL':     { url: US_ENVEL_URL,      name: '엔벨로프 (미국)' },
+        'US_CLOSE_BET': { url: US_CLOSE_BET_URL,  name: '종가베팅 (미국)' },
     };
 
     const strategy = strategyMap[strategyType];
@@ -94,7 +96,6 @@ async function sendDiscordHeartbeat(strategyType) {
 
     try {
         const response = await fetch(strategy.url);
-        const time = new Date().toLocaleTimeString();
 
         if (response.ok) {
             const data = await response.json();
@@ -107,7 +108,7 @@ async function sendDiscordHeartbeat(strategyType) {
             console.log(`[${time}] ${strategy.name} 호출 시도 했으나 서버 상태가 이상합니다. (상태: ${response.status})`);
         }
     } catch (error) {
-        console.error(`[${new Date().toLocaleTimeString()}] ${strategy.name} 호출 실패:`, error.message);
+        console.error(`[${time}] ${strategy.name} 호출 실패:`, error.message);
     }
 }
 
@@ -133,6 +134,7 @@ setInterval(() => {
 
     // 주말(토=6, 일=0)에는 아무것도 안 하고 패스
     //if (day === 0 || day === 6) return;
+    if (day === 0) return;
 
     const formattedHour = String(hour).padStart(2, '0');
     const formattedMinute = String(minute).padStart(2, '0');
@@ -143,7 +145,9 @@ setInterval(() => {
     const scheduleMap = {
         // 🇰🇷 국내주식
         "08:30": "KR_ENVEL",
+        "08:50": "KR_ENVEL",
         "09:00": "KR_ENVEL",
+        "09:10": "KR_ENVEL",
         "13:00": "KR_ENVEL",
         "14:00": "KR_ENVEL",
         "15:00": "KR_ENVEL",
@@ -152,8 +156,12 @@ setInterval(() => {
         "15:25": "KR_CLOSE_BET",
 
         // 🇺🇸 미국주식 (서머타임 기준)
-        "22:15": "US_ENVEL",
+        "22:10": "US_ENVEL",
+        "22:20": "US_ENVEL",
         "22:30": "US_ENVEL",
+        "22:35": "US_ENVEL",
+        "22:40": "US_ENVEL",
+        "22:50": "US_ENVEL",
         "23:00": "US_ENVEL",
         "23:30": "US_ENVEL",
         "00:00": "US_ENVEL",
@@ -162,11 +170,13 @@ setInterval(() => {
         //"02:30": "US_ENVEL",
         //"04:50": "US_CLOSE_BET",
         //"05:05": "US_CLOSE_BET",
+        "04:45": "US_CLOSE_BET",
+        "04:55": "US_CLOSE_BET",
         "06:40": "US_CLOSE_BET",
         "07:00": "US_CLOSE_BET",
         "07:30": "US_CLOSE_BET",
-        //"23:57": "US_ENVEL", //TEST
-        //"00:00": "US_CLOSE_BET", //TEST
+        "01:02": "US_ENVEL", //TEST
+        "01:03": "US_CLOSE_BET", //TEST
     };
 
     const strategyType = scheduleMap[currentTime];
@@ -177,3 +187,67 @@ setInterval(() => {
         sendDiscordHeartbeat(strategyType);
     }
 }, 30 * 1000); // 30초마다 시계 확인
+
+
+// ════════════════════════════════════════════════════════
+// 🤖 [신규] 디스코드 양방향 채팅 봇 로직 (영욱문AI비서)
+// ════════════════════════════════════════════════════════
+const { Client, GatewayIntentBits } = require('discord.js');
+
+// 💡 봇이 디스코드에서 할 수 있는 행동 반경(권한)을 설정합니다.
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent // ⭐️ 유저가 친 채팅 내용을 읽기 위해 절대적으로 필요!
+    ]
+});
+
+// 봇이 켜졌을 때 딱 한 번 실행되는 인사
+client.once('clientReady', () => {
+    console.log(`\n💬 디스코드 양방향 통신 준비 완료! AI비서 ...`);
+});
+
+// 채팅방에 메시지가 올라올 때마다 실행되는 핵심 로직!
+client.on('messageCreate', async (message) => {
+    // 1. 봇이 스스로 보낸 메시지거나, '!'로 시작하지 않는 일반 대화는 무시합니다.
+    if (message.author.bot || !message.content.startsWith('!')) return;
+
+    const command = message.content;
+    const time = new Date().toLocaleTimeString();
+
+    // 2. 명령어 4개 분기 처리 + 도움말
+    if (command === '!국내엔벨') {
+        console.log(`[${time}] 유저 명령 수신: !국내엔벨`);
+        await message.reply('🔎 넵! 즉시 [🇰🇷 국내 주식 엔벨로프 낙주] 타점을 스캔해 오겠습니다. (약 3~5초 소요)');
+        await sendDiscordHeartbeat('KR_ENVEL'); 
+        
+    } else if (command === '!미국엔벨') {
+        console.log(`[${time}] 유저 명령 수신: !미국엔벨`);
+        await message.reply('🦅 넵! 즉시 [🇺🇸 미국 주식 엔벨로프 낙주] 타점을 스캔해 오겠습니다.');
+        await sendDiscordHeartbeat('US_ENVEL'); 
+        
+    } else if (command === '!국내종가') {
+        console.log(`[${time}] 유저 명령 수신: !국내종가`);
+        await message.reply('🌙 [🇰🇷 국내 주식 종가베팅] 타점을 긁어오는 중입니다...');
+        await sendDiscordHeartbeat('KR_CLOSE_BET'); 
+        
+    } else if (command === '!미국종가') {
+        console.log(`[${time}] 유저 명령 수신: !미국종가`);
+        await message.reply('🗽 [🇺🇸 미국 주식 종가베팅] 타점을 긁어오는 중입니다...');
+        await sendDiscordHeartbeat('US_CLOSE_BET'); 
+        
+    } else if (command === '!도움말') {
+        // 사용 가능한 명령어 리스트 안내 (깔끔하게 줄바꿈 적용)
+        const helpText = `**🤖 영욱문AI비서 전술 명령어 목록**
+\`!국내엔벨\` : 🇰🇷 한국장 장중 급락 (낙주매매) 스캔
+\`!미국엔벨\` : 🇺🇸 미국장 장중 급락 (낙주매매) 스캔
+\`!국내종가\` : 🇰🇷 한국장 마감 직전 종가베팅 스캔
+\`!미국종가\` : 🇺🇸 미국장 마감 직전 종가베팅 스캔`;
+        
+        message.reply(helpText);
+    }
+});
+
+// 💡 .env 금고에 넣어둔 토큰으로 디스코드 서버에 접속(로그인)합니다.
+client.login(process.env.DISCORD_BOT_TOKEN);

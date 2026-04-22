@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const usStockService = require('../services/usStockService');
+const kisService = require('../services/kisService');
 
 // ════════════════════════════════════════════════════════
-// [API 1] 미국 주식 종가베팅 & 신고가 검색
+// [API 1] 미국 주식 종가베팅 & 신고가 검색 (KIS API)
 // GET /api/yahoo2/us-closing-bet
 // ════════════════════════════════════════════════════════
 router.get('/us-closing-bet', async (req, res) => {
     try {
-        const result = await usStockService.getUsClosingBetList();
+        const result = await kisService.getUsClosingBetListByKis();
         res.json({
             success: true,
             totalScanned: result.totalScanned,
@@ -23,12 +23,12 @@ router.get('/us-closing-bet', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════
-// [API 2] 미국 주식 엔벨로프 하한선(낙폭과대) 검색
+// [API 2] 미국 주식 엔벨로프 하한선(낙폭과대) 검색 (KIS API)
 // GET /api/yahoo2/us-envelope
 // ════════════════════════════════════════════════════════
 router.get('/us-envelope', async (req, res) => {
     try {
-        const result = await usStockService.getUsEnvelopeBetList();
+        const result = await kisService.getUsEnvelopeBetListByKis();
         res.json({
             success: true,
             count: result.candidates.length,
