@@ -234,7 +234,7 @@ client.on('messageCreate', async (message) => {
     // 1. 봇이 스스로 보낸 메시지거나, '!'로 시작하지 않는 일반 대화는 무시합니다.
     if (message.author.bot || !message.content.startsWith('!')) return;
 
-    const command = message.content.trim();
+    const command = message.content.trim().toUpperCase();
     const time = new Date().toLocaleTimeString();
 
     // 숫자 suffix 파싱 헬퍼 (예: '!미국종가50' → limit=50, '!미국종가' → limit=200)
