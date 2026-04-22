@@ -300,7 +300,9 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
             await delay(300);
 
         } catch (err) {
-            console.error(`[${stock.name}] 일봉 데이터 조회 실패:`, err.message);
+            const kisMsg = err.response?.data?.msg1 || err.response?.data?.message || err.message;
+            const kisCode = err.response?.data?.msg_cd || err.response?.status || '';
+            console.error(`[${stock.name}] 일봉 데이터 조회 실패: [${kisCode}] ${kisMsg}`);
         }
     }
 
