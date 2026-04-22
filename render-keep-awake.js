@@ -10,7 +10,9 @@ const KR_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/closi
 
 // 🇺🇸 미국주식 종가베팅: Render 서버 KIS 라우터 사용
 const US_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/us-closing-bet';
-// 🇺🇸 미국주식 엔벨로프: Yahoo chart() 사용 → Render에서 차단되므로 로컬 직접 호출
+// 🇰🇷 국내주식 RSI
+const KR_RSI_URL        = 'https://trade-backend-3o2e.onrender.com/api/kis/kr-rsi';
+// 🇺🇸 미국주식 엔벨로프 & RSI: Yahoo chart() → Render에서 차단되므로 로컬 직접 호출
 const usStockService = require('./services/usStockService');
 
 // Supabase DB정보 세팅 (7일동안 호출없으면 일시정지 되므로..)
@@ -84,16 +86,20 @@ wakeUpSupabase();
 async function sendDiscordHeartbeat(strategyType, limit = 200) {
     const time = new Date().toLocaleTimeString();
 
-    // 🇺🇸 미국 엔벨로프: Yahoo chart() → Render에서 차단되므로 로컬 직접 호출
-    if (strategyType === 'US_ENVEL') {
+    // 🇺🇸 미국 로컬 호출 전략 (Yahoo chart → Render 차단)
+    if (strategyType === 'US_ENVEL' || strategyType === 'US_RSI') {
+        const isRsi = strategyType === 'US_RSI';
+        const strategyName = isRsi ? 'RSI 과매도 (미국)' : '엔벨로프 (미국)';
         try {
-            const result = await usStockService.getUsEnvelopeBetList(limit);
-            console.log(`[${time}] 엔벨로프 (미국) 조회 완료! (스캔: ${limit}개 / 포착: ${result.candidates.length}개)`);
+            const result = isRsi
+                ? await usStockService.getUsRsiList(limit)
+                : await usStockService.getUsEnvelopeBetList(limit);
+            console.log(`[${time}] ${strategyName} 조회 완료! (스캔: ${limit}개 / 포착: ${result.candidates.length}개)`);
             if (result.candidates.length > 0) {
-                await discordService.sendDiscordMessage('엔벨로프 (미국)', result.candidates);
+                await discordService.sendDiscordMessage(strategyName, result.candidates);
             }
         } catch (error) {
-            console.error(`[${time}] 엔벨로프 (미국) 로컬 실행 실패:`, error.message);
+            console.error(`[${time}] ${strategyName} 로컬 실행 실패:`, error.message);
         }
         return;
     }
@@ -102,6 +108,7 @@ async function sendDiscordHeartbeat(strategyType, limit = 200) {
     const strategyMap = {
         'KR_ENVEL':     { url: KR_ENVEL_URL,                              name: '엔벨로프 (국내)' },
         'KR_CLOSE_BET': { url: KR_CLOSE_BET_URL,                          name: '종가베팅 (국내)' },
+        'KR_RSI':       { url: KR_RSI_URL,                                name: 'RSI 과매도 (국내)' },
         'US_CLOSE_BET': { url: `${US_CLOSE_BET_URL}?limit=${limit}`,      name: '종가베팅 (미국)' },
     };
 
@@ -260,12 +267,25 @@ client.on('messageCreate', async (message) => {
         await message.reply(`🗽 [🇺🇸 미국 주식 종가베팅] ${limit}개 종목 스캔 시작합니다. (약 ${Math.ceil(limit * 1.1 / 60)}~${Math.ceil(limit * 1.3 / 60)}분 소요)`);
         await sendDiscordHeartbeat('US_CLOSE_BET', limit);
 
+    } else if (command.startsWith('!국내RSI')) {
+        console.log(`[${time}] 유저 명령 수신: ${command}`);
+        await message.reply('📊 [🇰🇷 국내주식 RSI 과매도] 스캔 시작합니다. (약 1~2분 소요)');
+        await sendDiscordHeartbeat('KR_RSI');
+
+    } else if (command.startsWith('!미국RSI')) {
+        const limit = parseLimit('!미국RSI');
+        console.log(`[${time}] 유저 명령 수신: !미국RSI (limit: ${limit})`);
+        await message.reply(`📊 [🇺🇸 미국주식 RSI 과매도] ${limit}개 종목 스캔 시작합니다.`);
+        await sendDiscordHeartbeat('US_RSI', limit);
+
     } else if (command === '!도움말') {
         const helpText = `**🤖 영욱문AI비서 전술 명령어 목록**
 \`!국내엔벨\` : 🇰🇷 한국장 장중 급락 (낙주매매) 스캔
 \`!미국엔벨[숫자]\` : 🇺🇸 미국장 엔벨로프 스캔 (예: \`!미국엔벨50\`, 기본값 200)
 \`!국내종가\` : 🇰🇷 한국장 마감 직전 종가베팅 스캔
-\`!미국종가[숫자]\` : 🇺🇸 미국장 종가베팅 스캔 (예: \`!미국종가100\`, 기본값 200)`;
+\`!미국종가[숫자]\` : 🇺🇸 미국장 종가베팅 스캔 (예: \`!미국종가100\`, 기본값 200)
+\`!국내RSI\` : 🇰🇷 한국장 RSI 과매도 종목 스캔
+\`!미국RSI[숫자]\` : 🇺🇸 미국장 RSI 과매도 스캔 (예: \`!미국RSI50\`, 기본값 200)`;
         message.reply(helpText);
     }
 });

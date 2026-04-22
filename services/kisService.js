@@ -501,10 +501,87 @@ async function getUsEnvelopeBetListByKis() {
     return { totalScanned: topStocks.length, totalScanList: topStocks, candidates };
 }
 
+// ════════════════════════════════════════════════════════
+// [공통] RSI(14) 계산 함수
+// closePrices: 최신순 배열 [오늘, 어제, ...]
+// ════════════════════════════════════════════════════════
+function calcRSI(closePrices, period = 14) {
+    if (closePrices.length < period + 1) return null;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+        const diff = closePrices[i - 1] - closePrices[i]; // 최신 - 이전
+        if (diff > 0) gains += diff;
+        else losses += Math.abs(diff);
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    return parseFloat((100 - 100 / (1 + avgGain / avgLoss)).toFixed(1));
+}
+
+// ════════════════════════════════════════════════════════
+// [서비스] 국내주식 RSI 과매도 종목 스캔 (RSI <= rsiThreshold)
+// ════════════════════════════════════════════════════════
+async function getKrRsiList(rsiThreshold = 30) {
+    console.log(`👀 [DEBUG] 국내주식 RSI 과매도 스캔 시작... (기준: RSI <= ${rsiThreshold})`);
+    const token = await getKisAccessToken();
+
+    const kospiData = await getTopVolumeList('KOSPI');
+    await delay(1100);
+    const kosdaqData = await getTopVolumeList('KOSDAQ');
+
+    const topStocks = [...kospiData, ...kosdaqData].sort((a, b) => b.tradeValue - a.tradeValue);
+    const candidates = [];
+
+    for (const stock of topStocks) {
+        try {
+            const chartRes = await axios.get(`${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/inquire-daily-price`, {
+                headers: getKisHeaders(token, 'FHKST01010400'),
+                params: {
+                    FID_COND_MRKT_DIV_CODE: 'J',
+                    FID_INPUT_ISCD: stock.ticker,
+                    FID_ORG_ADJ_PRC: '1',
+                    FID_PERIOD_DIV_CODE: 'D'
+                }
+            });
+
+            const dailyData = chartRes.data.output;
+            if (dailyData && dailyData.length >= 15) {
+                const closePrices = dailyData.map(d => Number(d.stck_clpr)); // 최신순
+                const rsi = calcRSI(closePrices);
+
+                if (rsi !== null && rsi <= rsiThreshold) {
+                    const marketCap = stock.price * stock.listedShares;
+                    const eok = Math.floor(marketCap / 100000000);
+                    const formattedTotalPrice = eok >= 10000
+                        ? `${Math.floor(eok / 10000)}조 ${eok % 10000}억`
+                        : `${eok}억`;
+
+                    candidates.push({
+                        ...stock,
+                        rsi,
+                        totalPriceFormatted: formattedTotalPrice,
+                        dataFg: 'RSI과매도'
+                    });
+                }
+            }
+
+            await delay(1100);
+        } catch (err) {
+            const kisMsg = err.response?.data?.msg1 || err.message;
+            console.error(`[${stock.name}] RSI 조회 실패:`, kisMsg);
+        }
+    }
+
+    console.log(`✅ [DEBUG] 국내주식 RSI 스캔 완료 (후보: ${candidates.length}건)`);
+    return { totalScanned: topStocks.length, candidates };
+}
+
 module.exports = {
     getTopVolumeList,
     getClosingBetList,
     getEnvelopeBetList,
+    getKrRsiList,
     getUsClosingBetListByKis,
     getUsEnvelopeBetListByKis
 };

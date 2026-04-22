@@ -10,11 +10,12 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // ════════════════════════════════════════════════════════
 const US_WATCH_LIST = require('../data/usWatchList');
 
-async function getUsTopVolumeList() {
+async function getUsTopVolumeList(limit = US_WATCH_LIST.length) {
     try {
         const results = [];
-        for (let i = 0; i < US_WATCH_LIST.length; i++) {
-            const watchItem = US_WATCH_LIST[i];
+        const targetList = US_WATCH_LIST.slice(0, limit);
+        for (let i = 0; i < targetList.length; i++) {
+            const watchItem = targetList[i];
             const ticker = watchItem.ticker;
             try {
                 const quote = await yahooFinance.quote(ticker);
@@ -125,8 +126,7 @@ async function getUsClosingBetList() {
 async function getUsEnvelopeBetList(limit = 200) {
     console.log(`👀 [DEBUG] 미국 주식 엔벨로프 하한선 스캔 시작... (${limit}개)`);
 
-    const allStocks = await getUsTopVolumeList();
-    const topStocks = allStocks.slice(0, limit);
+    const topStocks = await getUsTopVolumeList(limit);
     const candidates = [];
 
     if (topStocks.length === 0) return { totalScanned: 0, totalScanList: [], candidates: [] };
@@ -205,8 +205,81 @@ async function getUsEnvelopeBetList(limit = 200) {
     };
 }
 
+// ════════════════════════════════════════════════════════
+// [공통] RSI(14) 계산 함수
+// closePrices: 최신순 배열 [오늘, 어제, ...]
+// ════════════════════════════════════════════════════════
+function calcRSI(closePrices, period = 14) {
+    if (closePrices.length < period + 1) return null;
+    let gains = 0, losses = 0;
+    for (let i = 1; i <= period; i++) {
+        const diff = closePrices[i - 1] - closePrices[i];
+        if (diff > 0) gains += diff;
+        else losses += Math.abs(diff);
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    return parseFloat((100 - 100 / (1 + avgGain / avgLoss)).toFixed(1));
+}
+
+// ════════════════════════════════════════════════════════
+// [서비스] 미국주식 RSI 과매도 종목 스캔 (Yahoo chart 로컬 호출)
+// ════════════════════════════════════════════════════════
+async function getUsRsiList(limit = 200, rsiThreshold = 30) {
+    console.log(`👀 [DEBUG] 미국주식 RSI 과매도 스캔 시작... (${limit}개 / 기준: RSI <= ${rsiThreshold})`);
+
+    const topStocks = await getUsTopVolumeList(limit);
+    const candidates = [];
+
+    for (const stock of topStocks) {
+        try {
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 45);
+
+            const chartResult = await yahooFinance.chart(stock.ticker, {
+                period1: startDate,
+                period2: endDate,
+                interval: '1d'
+            });
+
+            const validData = chartResult?.quotes?.filter(d => d.close !== null) || [];
+
+            if (validData.length >= 15) {
+                const sorted = [...validData].sort((a, b) => new Date(b.date) - new Date(a.date));
+                const closePrices = sorted.map(d => d.adjclose || d.close);
+                const rsi = calcRSI(closePrices);
+
+                if (rsi !== null && rsi <= rsiThreshold) {
+                    const marketCap = stock.marketCap;
+                    const billion = marketCap ? Math.floor(marketCap / 1000000000) : 0;
+                    const formattedTotalPrice = marketCap
+                        ? (billion > 0 ? `$${billion}B` : `$${Math.floor(marketCap / 1000000)}M`)
+                        : 'N/A';
+
+                    candidates.push({
+                        ...stock,
+                        rsi,
+                        totalPriceFormatted: formattedTotalPrice,
+                        dataFg: 'RSI과매도'
+                    });
+                }
+            }
+
+            await delay(300);
+        } catch (err) {
+            console.error(`[${stock.ticker}] RSI 조회 실패:`, err.message);
+        }
+    }
+
+    console.log(`✅ [DEBUG] 미국주식 RSI 스캔 완료 (후보: ${candidates.length}건)`);
+    return { totalScanned: topStocks.length, candidates };
+}
+
 module.exports = {
     getUsTopVolumeList,
     getUsClosingBetList,
-    getUsEnvelopeBetList
+    getUsEnvelopeBetList,
+    getUsRsiList
 };

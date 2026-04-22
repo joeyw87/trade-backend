@@ -8,8 +8,9 @@ async function sendDiscordMessage(strategyName, candidates) {
     if (!webhookUrl || candidates.length === 0) return;
 
     try {
-        const cardColor = isEnvelope ? 16711680 : 65280; 
-        const icon = isEnvelope ? '🩸' : '🔥'; 
+        const isRSI = strategyName.includes('RSI');
+        const cardColor = isEnvelope ? 16711680 : isRSI ? 16744192 : 65280;
+        const icon = isEnvelope ? '🩸' : isRSI ? '📊' : '🔥';
 
         // 💡 1. 종목 한 줄 텍스트 생성 함수
         const toLine = (stock, index) => {
@@ -20,13 +21,16 @@ async function sendDiscordMessage(strategyName, candidates) {
                 : `https://finance.naver.com/item/main.naver?code=${stock.ticker}`;
 
             let extraText = '';
-            if (isEnvelope) {
+            if (isRSI) {
+                // 📊 RSI 과매도 전략일 때
+                extraText = stock.rsi != null ? `(📊 RSI ${stock.rsi})` : '(📊 RSI 과매도)';
+            } else if (isEnvelope) {
                 // 🩸 엔벨로프 전략일 때
                 if (stock.score)                extraText = `(💯 ${stock.score}점)`;
                 else if (stock.gapFromLowerBand) extraText = `(📉 이격 ${stock.gapFromLowerBand}%)`;
                 else                             extraText = `(🩸 낙폭과대)`;
             } else {
-                // 🔥 종가베팅 전략일 때 (점수가 없으므로 돌파 포착 문구로 대체)
+                // 🔥 종가베팅 전략일 때
                 if (stock.changeRate) extraText = `(🔥 ${stock.changeRate > 0 ? '+' : ''}${stock.changeRate}%)`;
                 else                  extraText = `(🎯 조건돌파)`;
             }
@@ -35,9 +39,9 @@ async function sendDiscordMessage(strategyName, candidates) {
             return `**${index + 1}. [${displayName}](${chartUrl})** : ${stock.price.toLocaleString()}${currency} ${extraText}`;
         };
 
-        // 💡 2. 종가베팅은 dataFg(종가베팅/신고가돌파)로 구분, 엔벨로프는 그대로
+        // 💡 2. 전략별 설명 텍스트 구성
         let descriptionString = '';
-        if (isEnvelope) {
+        if (isEnvelope || isRSI) {
             descriptionString = candidates.slice(0, 30).map(toLine).join('\n\n');
         } else {
             const closingBets  = candidates.filter(s => s.dataFg !== '신고가돌파');

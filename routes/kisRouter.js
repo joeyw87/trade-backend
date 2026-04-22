@@ -139,4 +139,23 @@ router.get('/us-envelope', async (req, res) => {
     }
 });
 
+// ════════════════════════════════════════════════════════
+// [국내주식 RSI] 과매도 종목 스캔
+// GET /api/kis/kr-rsi?threshold=30
+// ════════════════════════════════════════════════════════
+router.get('/kr-rsi', async (req, res) => {
+    try {
+        const threshold = Math.min(parseInt(req.query.threshold) || 30, 50);
+        const result = await kisService.getKrRsiList(threshold);
+        res.json({
+            success: true,
+            count: result.candidates.length,
+            ...result
+        });
+    } catch (error) {
+        console.error('국내 RSI 라우터 에러:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 module.exports = router;
