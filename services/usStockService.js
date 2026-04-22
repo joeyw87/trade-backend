@@ -4,30 +4,25 @@ const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ════════════════════════════════════════════════════════
-// [내부 함수] 미국 주식 거래량 상위 종목 가져오기
+// [내부 함수] 미국 주식 목록 가져오기
 // Yahoo Finance screener API가 인증 오류를 일으키므로
-// 고정 티커 리스트로 quote 조회 방식으로 대체
+// data/usWatchList.js 200개 고정 리스트로 quote 조회 방식 사용
 // ════════════════════════════════════════════════════════
-const US_TOP_TICKERS = [
-    'NVDA', 'AAPL', 'MSFT', 'AMZN', 'META', 'GOOGL', 'TSLA', 'AVGO', 'AMD',
-    'PLTR', 'INTC', 'ORCL', 'NFLX', 'CRM', 'UBER', 'SHOP', 'SOFI', 'SMCI',
-    'ARM', 'MU', 'MRVL', 'AMAT', 'PANW', 'SNOW', 'COIN', 'RBLX', 'MSTR',
-    'SQ', 'HOOD', 'RIVN', 'LCID', 'NIO', 'BABA', 'JD', 'SNAP', 'PINS',
-    'LYFT', 'DASH', 'ABNB', 'SPOT', 'PYPL', 'AFRM', 'UPST', 'U', 'DKNG',
-    'SIRI', 'F', 'GM', 'BAC', 'C'
-];
+const US_WATCH_LIST = require('../data/usWatchList');
 
 async function getUsTopVolumeList() {
     try {
         const results = [];
-        for (let i = 0; i < US_TOP_TICKERS.length; i++) {
-            const ticker = US_TOP_TICKERS[i];
+        for (let i = 0; i < US_WATCH_LIST.length; i++) {
+            const watchItem = US_WATCH_LIST[i];
+            const ticker = watchItem.ticker;
             try {
                 const quote = await yahooFinance.quote(ticker);
                 if (quote && quote.regularMarketPrice) {
                     results.push({
                         rank: i + 1,
                         ticker: quote.symbol,
+                        excd: watchItem.excd,
                         name: quote.shortName || quote.longName || ticker,
                         marketType: 'US',
                         price: quote.regularMarketPrice,
@@ -35,6 +30,8 @@ async function getUsTopVolumeList() {
                         volume: quote.regularMarketVolume,
                         marketCap: quote.marketCap
                     });
+                } else {
+                    console.warn(`  [${ticker}] 제외됨 - regularMarketPrice 없음 (상장폐지 또는 데이터 없음)`);
                 }
             } catch (err) {
                 console.error(`[${ticker}] quote 조회 실패:`, err.message);

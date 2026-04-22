@@ -197,7 +197,7 @@ async function getClosingBetList(marketType = 'ALL', exclCode = '111111111') {
             }
 
             // KIS 서버 요청 중간 딜레이 추가
-            await delay(500);
+            await delay(1100);
 
         } catch (err) {
             const kisErrorMsg = err.response?.data?.msg1 || err.message;
@@ -320,7 +320,7 @@ async function getEnvelopeBetList(marketType = 'ALL', exclCode = '111111111') {
 // ════════════════════════════════════════════════════════
 const US_WATCH_LIST = require('../data/usWatchList');
 
-async function getUsTopVolumeListByKis(limit = 50) {
+async function getUsTopVolumeListByKis(limit = 200) {
     return US_WATCH_LIST.slice(0, limit).map((stock, index) => ({
         rank: index + 1,
         ticker: stock.ticker,
@@ -397,7 +397,7 @@ async function getUsClosingBetListByKis() {
                 }
             }
 
-            await delay(500);
+            await delay(1100);
         } catch (err) {
             const kisErrorMsg = err.response?.data?.msg1 || err.message;
             console.error(`[${stock.ticker}] KIS 미국 종가베팅 상세 조회 실패:`, kisErrorMsg);
