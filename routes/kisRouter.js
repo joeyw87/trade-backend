@@ -4,6 +4,7 @@ const router = express.Router();
 
 // 💡 1. 비즈니스 로직(Service) 모듈 불러오기
 const kisService = require('../services/kisService');
+const usStockService = require('../services/usStockService');
 // 디스코드 서비스
 const discordService = require('../services/discordService');
 
@@ -124,16 +125,16 @@ router.get('/us-closing-bet', async (req, res) => {
 // ════════════════════════════════════════════════════════
 router.get('/us-envelope', async (req, res) => {
     try {
-        const result = await kisService.getUsEnvelopeBetListByKis();
+        // KIS 해외주식 일봉 API 미지원 → Yahoo Finance chart() 개별 호출로 대체
+        const result = await usStockService.getUsEnvelopeBetList();
         res.json({
             success: true,
             count: result.candidates.length,
             ...result
         });
     } catch (error) {
-        const kisMsg = error.response?.data?.msg1 || error.message;
-        console.error("KIS 미국 엔벨로프 라우터 에러:", kisMsg);
-        res.status(500).json({ success: false, error: kisMsg });
+        console.error("미국 엔벨로프 라우터 에러:", error.message);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
