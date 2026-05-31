@@ -85,6 +85,93 @@ async function sendDiscordMessage(strategyName, candidates) {
     }
 }
 
+// ════════════════════════════════════════════════════════
+// JYP 픽 관심종목 현황 디스코드 메시지 전송
+// 섹터별로 그룹핑, 등락률 강조 표시
+// ════════════════════════════════════════════════════════
+async function sendJypPicksMessage(stocks) {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_JYP_URL;
+    if (!webhookUrl || stocks.length === 0) return;
+
+    try {
+        // 섹터별 그룹핑
+        const sectorMap = {};
+        for (const stock of stocks) {
+            if (!sectorMap[stock.sector]) sectorMap[stock.sector] = [];
+            sectorMap[stock.sector].push(stock);
+        }
+
+        const lines = [];
+        for (const [sector, items] of Object.entries(sectorMap)) {
+            lines.push(`**📂 ${sector}**`);
+            for (const s of items) {
+                const changeEmoji = s.changeRate > 0 ? '🔺' : s.changeRate < 0 ? '🔻' : '➖';
+                const changeStr = `${s.changeRate > 0 ? '+' : ''}${s.changeRate}%`;
+                const fromHighStr = s.fromHigh !== null ? ` | 고점대비 ${s.fromHigh}%` : '';
+                const chartUrl = `https://finance.yahoo.com/quote/${s.ticker}`;
+                lines.push(`[${s.name} (${s.ticker})](${chartUrl}) : $${s.price.toLocaleString()} ${changeEmoji} ${changeStr}${fromHighStr}`);
+            }
+            lines.push('');
+        }
+
+        const embed = {
+            title: `🎯 [JYP 픽] 관심종목 현황 (${stocks.length}개)`,
+            description: lines.join('\n'),
+            color: 9699539, // 보라색
+            footer: { text: '종목명을 터치하면 차트로 이동합니다.' },
+            timestamp: new Date().toISOString()
+        };
+
+        await axios.post(webhookUrl, { embeds: [embed] });
+        console.log('✅ [디스코드] JYP 픽 메시지 전송 완료!');
+
+    } catch (error) {
+        console.error('❌ [디스코드] JYP 픽 메시지 전송 실패:', error.message);
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// JYP 픽 당일 분봉 최저가 근접 알림
+// ════════════════════════════════════════════════════════
+async function sendJypIntradayAlertMessage(alerts, threshold = 3) {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_JYP_URL;
+    if (!webhookUrl) return;
+
+    try {
+        let embed;
+        if (alerts.length === 0) {
+            embed = {
+                title: `📍 [JYP 픽] 당일 저점 근접 알림`,
+                description: `현재 저점 기준 **±${threshold}%** 이내에 진입한 종목이 없습니다.`,
+                color: 8421504, // 회색
+                timestamp: new Date().toISOString()
+            };
+        } else {
+            const lines = alerts.map(s => {
+                const chartUrl = `https://finance.yahoo.com/quote/${s.ticker}`;
+                const gapStr = s.gapFromLow === 0
+                    ? '🔴 **당일 최저점!**'
+                    : `📍 저점 대비 +${s.gapFromLow}%`;
+                return `**[${s.name} (${s.ticker})](${chartUrl})**\n현재가: $${s.price.toLocaleString()} | 당일저점: $${s.intradayLow} | ${gapStr}`;
+            });
+            embed = {
+                title: `📍 [JYP 픽] 당일 저점 근접 알림 (${alerts.length}건)`,
+                description: lines.join('\n\n'),
+                color: 16744192, // 주황색
+                footer: { text: `당일 저점 기준 ±${threshold}% 이내 종목만 표시됩니다.` },
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        await axios.post(webhookUrl, { embeds: [embed] });
+        console.log(`✅ [디스코드] JYP 저점 알림 전송 완료! (${alerts.length}건)`);
+    } catch (error) {
+        console.error('❌ [디스코드] JYP 저점 알림 전송 실패:', error.message);
+    }
+}
+
 module.exports = {
-    sendDiscordMessage
+    sendDiscordMessage,
+    sendJypPicksMessage,
+    sendJypIntradayAlertMessage
 };

@@ -12,7 +12,7 @@ const KR_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/closi
 const US_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/us-closing-bet';
 // 🇰🇷 국내주식 RSI
 const KR_RSI_URL        = 'https://trade-backend-3o2e.onrender.com/api/kis/kr-rsi';
-// 🇺🇸 미국주식 엔벨로프 & RSI: Yahoo chart() → Render에서 차단되므로 로컬 직접 호출
+// 🇺🇸 미국주식 엔벨로프 & RSI & JYP픽: Yahoo → Render에서 차단되므로 로컬 직접 호출
 const usStockService = require('./services/usStockService');
 
 // Supabase DB정보 세팅 (7일동안 호출없으면 일시정지 되므로..)
@@ -83,8 +83,42 @@ wakeUpSupabase();
 // ════════════════════════════════════════════════════════
 // 2. 디스코드 알림 발송 함수
 // ════════════════════════════════════════════════════════
-async function sendDiscordHeartbeat(strategyType, limit = 200) {
+async function sendDiscordHeartbeat(strategyType, limit = 200, silent = true) {
     const time = new Date().toLocaleTimeString();
+
+    // 🇺🇸 JYP 픽 로컬 호출
+    if (strategyType === 'US_JYP') {
+        try {
+            const stocks = await usStockService.getJypPicksStatus();
+            console.log(`[${time}] JYP 픽 조회 완료! (${stocks.length}개)`);
+            if (stocks.length > 0) {
+                await discordService.sendJypPicksMessage(stocks);
+            }
+        } catch (error) {
+            console.error(`[${time}] JYP 픽 로컬 실행 실패:`, error.message);
+        }
+        return;
+    }
+
+    // 🇺🇸 JYP 픽 당일 분봉 저점 근접 감지
+    if (strategyType === 'US_JYP_LOW') {
+        const threshold = (limit <= 20) ? limit : 3; // 스케줄러 기본(200) → 3%, 수동입력 → 그대로
+        try {
+            const alerts = await usStockService.getJypIntradayLowAlert(threshold);
+            console.log(`[${time}] JYP 저점 감지 완료! (저점근접: ${alerts.length}건)`);
+            if (alerts.length > 0) {
+                await discordService.sendJypIntradayAlertMessage(alerts, threshold);
+            } else if (!silent) {
+                // 수동 명령일 때만 "없음" 피드백 전송
+                await discordService.sendJypIntradayAlertMessage([], threshold);
+            } else {
+                console.log(`[${time}] 저점 근접 종목 없음 (기준: ±${threshold}%) — 자동실행, 알림 생략`);
+            }
+        } catch (error) {
+            console.error(`[${time}] JYP 저점 감지 실패:`, error.message);
+        }
+        return;
+    }
 
     // 🇺🇸 미국 로컬 호출 전략 (Yahoo chart → Render 차단)
     if (strategyType === 'US_ENVEL' || strategyType === 'US_RSI') {
@@ -198,6 +232,14 @@ setInterval(() => {
         "07:30": "US_CLOSE_BET",
         "01:02": "US_ENVEL", //TEST
         "01:03": "US_CLOSE_BET", //TEST
+
+        // 🎯 JYP 픽 당일 저점 근접 감지 (자동, threshold 3%)
+        "22:35": "US_JYP_LOW", // 장 초반
+        "22:45": "US_JYP_LOW",
+        "22:55": "US_JYP_LOW",
+        "23:10": "US_JYP_LOW",
+        "23:30": "US_JYP_LOW", // 마지막 취침 전
+        "08:00": "US_JYP_LOW", // 다음날 아침 (전날 장 결과 확인)
     };
 
     const strategyType = scheduleMap[currentTime];
@@ -267,6 +309,19 @@ client.on('messageCreate', async (message) => {
         await message.reply(`🗽 [🇺🇸 미국 주식 종가베팅] ${limit}개 종목 스캔 시작합니다. (약 ${Math.ceil(limit * 1.1 / 60)}~${Math.ceil(limit * 1.3 / 60)}분 소요)`);
         await sendDiscordHeartbeat('US_CLOSE_BET', limit);
 
+    } else if (command.startsWith('!미국JYP저점')) {
+        const numStr = command.slice('!미국JYP저점'.length);
+        const parsed = parseInt(numStr, 10);
+        const threshold = (!numStr || isNaN(parsed) || parsed <= 0) ? 3 : Math.min(parsed, 20);
+        console.log(`[${time}] 유저 명령 수신: ${command} (threshold: ${threshold}%)`);
+        await message.reply(`📍 [JYP 픽] 당일 저점 근접 감지 중... (기준: 저점 대비 +${threshold}% 이내)`);
+        await sendDiscordHeartbeat('US_JYP_LOW', threshold, false);
+
+    } else if (command.startsWith('!미국JYP')) {
+        console.log(`[${time}] 유저 명령 수신: ${command}`);
+        await message.reply('🎯 [JYP 픽] 관심종목 현황 조회 중입니다...');
+        await sendDiscordHeartbeat('US_JYP');
+
     } else if (command.startsWith('!국내RSI')) {
         console.log(`[${time}] 유저 명령 수신: ${command}`);
         await message.reply('📊 [🇰🇷 국내주식 RSI 과매도] 스캔 시작합니다. (약 1~2분 소요)');
@@ -278,14 +333,56 @@ client.on('messageCreate', async (message) => {
         await message.reply(`📊 [🇺🇸 미국주식 RSI 과매도] ${limit}개 종목 스캔 시작합니다.`);
         await sendDiscordHeartbeat('US_RSI', limit);
 
-    } else if (command === '!도움말') {
-        const helpText = `**🤖 영욱문AI비서 전술 명령어 목록**
-\`!국내엔벨\` : 🇰🇷 한국장 장중 급락 (낙주매매) 스캔
-\`!미국엔벨[숫자]\` : 🇺🇸 미국장 엔벨로프 스캔 (예: \`!미국엔벨50\`, 기본값 200)
-\`!국내종가\` : 🇰🇷 한국장 마감 직전 종가베팅 스캔
-\`!미국종가[숫자]\` : 🇺🇸 미국장 종가베팅 스캔 (예: \`!미국종가100\`, 기본값 200)
-\`!국내RSI\` : 🇰🇷 한국장 RSI 과매도 종목 스캔
-\`!미국RSI[숫자]\` : 🇺🇸 미국장 RSI 과매도 스캔 (예: \`!미국RSI50\`, 기본값 200)`;
+    } else if (command === '!도움말' || command === '!사용법') {
+        const helpText = `**🤖 영욱문AI비서 명령어 사용법**
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🇰🇷 **국내주식**
+━━━━━━━━━━━━━━━━━━━━━━━━
+\`!국내엔벨\`
+└ 20일 이동평균선 -10% 이하로 내려온 낙폭과대 종목 스캔
+└ 자동 실행: 08:30 / 09:00 / 13:00 / 14:00 / 15:00
+
+\`!국내종가\`
+└ 당일 고저가 대비 상단 80% 이상 위치한 종가베팅 후보 스캔
+└ 자동 실행: 15:05 / 15:15 / 15:25
+
+\`!국내RSI\`
+└ RSI(14) 30 이하 과매도 종목 스캔 (반등 타점 탐색)
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🇺🇸 **미국주식**
+━━━━━━━━━━━━━━━━━━━━━━━━
+\`!미국엔벨\` / \`!미국엔벨[숫자]\`
+└ 20일선 -10% 이하 낙폭과대 종목 스캔
+└ 예: \`!미국엔벨50\` → 상위 50개만 스캔 (기본값 200)
+└ 자동 실행: 22:30 / 00:30 / 01:00 등 장 초반
+
+\`!미국종가\` / \`!미국종가[숫자]\`
+└ 당일 고저가 상단 80% + 시총 1억달러 이상 종가베팅 후보 스캔
+└ 예: \`!미국종가100\` → 상위 100개만 스캔 (기본값 200)
+└ 자동 실행: 04:45 / 04:55 (서머타임 장마감 직전)
+
+\`!미국RSI\` / \`!미국RSI[숫자]\`
+└ RSI(14) 30 이하 과매도 종목 스캔
+└ 예: \`!미국RSI50\` → 상위 50개만 스캔 (기본값 200)
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 **JYP 픽 관심종목**
+━━━━━━━━━━━━━━━━━━━━━━━━
+\`!미국JYP\`
+└ JYP 픽 전종목 현재 시세 조회
+└ 섹터별 그룹 표시 / 등락률 / 52주 고가 대비 위치 표시
+
+\`!미국JYP저점\` / \`!미국JYP저점[숫자]\`
+└ 당일 5분봉 기준 장중 최저가 근처에 있는 종목만 알림
+└ 숫자는 최저가 대비 허용 오차(%) — 낮을수록 더 타이트
+└ 예: \`!미국JYP저점3\` → 저점 대비 +3% 이내 (기본값 3%)
+└ 예: \`!미국JYP저점5\` → 저점 대비 +5% 이내
+└ ⚠️ 미국 장 시간(KST 22:30~05:00) 중에만 의미 있는 데이터
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📌 \`!도움말\` 또는 \`!사용법\` 으로 이 화면을 다시 볼 수 있습니다.`;
         message.reply(helpText);
     }
 });

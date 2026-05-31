@@ -277,9 +277,131 @@ async function getUsRsiList(limit = 200, rsiThreshold = 30) {
     return { totalScanned: topStocks.length, candidates };
 }
 
+// ════════════════════════════════════════════════════════
+// [서비스] JYP 픽 관심종목 현재 시세 조회
+// 필터 없이 전종목 현황 반환 (섹터 정보 포함)
+// ════════════════════════════════════════════════════════
+const JYP_PICK_LIST = require('../data/jypPickList');
+
+async function getJypPicksStatus() {
+    console.log(`👀 [DEBUG] JYP 픽 시세 조회 시작... (${JYP_PICK_LIST.length}개)`);
+    const results = [];
+
+    for (const item of JYP_PICK_LIST) {
+        try {
+            const quote = await yahooFinance.quote(item.ticker);
+            if (quote && quote.regularMarketPrice) {
+                const price = quote.regularMarketPrice;
+                const changeRate = quote.regularMarketChangePercent ?? 0;
+                const w52High = quote.fiftyTwoWeekHigh;
+
+                // 52주 고가 대비 현재가 위치 (%)
+                const fromHigh = w52High
+                    ? (((price / w52High) - 1) * 100).toFixed(1)
+                    : null;
+
+                results.push({
+                    ticker: item.ticker,
+                    name: item.name,
+                    sector: item.sector,
+                    marketType: 'US',
+                    price,
+                    changeRate: parseFloat(changeRate.toFixed(2)),
+                    w52High,
+                    fromHigh,   // 52주 고가 대비 (음수 = 고점 아래)
+                });
+            } else {
+                console.warn(`  [${item.ticker}] 시세 없음`);
+            }
+        } catch (err) {
+            console.error(`[${item.ticker}] JYP 시세 조회 실패:`, err.message);
+        }
+        await delay(200);
+    }
+
+    console.log(`✅ [DEBUG] JYP 픽 조회 완료 (${results.length}건)`);
+    return results;
+}
+
+// ════════════════════════════════════════════════════════
+// [서비스] JYP 픽 당일 분봉 최저가 근접 감지
+// Yahoo Finance 5분봉으로 오늘 장중 최저가를 계산하고
+// 현재가가 그 최저가 대비 threshold% 이내인 종목 반환
+// ════════════════════════════════════════════════════════
+// 미국 동부시간 DST 여부 판별 (2nd Sunday of March ~ 1st Sunday of November)
+function isUSEasternDST(date) {
+    const year = date.getFullYear();
+    const marchFirst = new Date(Date.UTC(year, 2, 1));
+    const dstStart = new Date(Date.UTC(year, 2, 8 + (7 - marchFirst.getUTCDay()) % 7, 7)); // 2nd Sun Mar 02:00 EST
+    const novFirst = new Date(Date.UTC(year, 10, 1));
+    const dstEnd   = new Date(Date.UTC(year, 10, 1 + (7 - novFirst.getUTCDay()) % 7, 6));  // 1st Sun Nov 02:00 EDT
+    return date >= dstStart && date < dstEnd;
+}
+
+async function getJypIntradayLowAlert(threshold = 3) {
+    console.log(`👀 [DEBUG] JYP 픽 당일 분봉 저점 감지 시작... (최저가 ±${threshold}% 이내)`);
+    const alerts = [];
+
+    for (const item of JYP_PICK_LIST) {
+        try {
+            // 서머타임: NYSE 09:30 ET = 13:30 UTC / 겨울타임: 09:30 ET = 14:30 UTC
+            const now = new Date();
+            const todayStart = new Date(now);
+            const isDST = isUSEasternDST(now);
+            todayStart.setUTCHours(isDST ? 13 : 14, 30, 0, 0);
+            console.log(`  [${item.ticker}] 장시작 기준: ${isDST ? '서머타임(13:30 UTC)' : '겨울타임(14:30 UTC)'}`);
+
+            const chartResult = await yahooFinance.chart(item.ticker, {
+                period1: todayStart,
+                period2: now,
+                interval: '5m'
+            });
+
+            const bars = chartResult?.quotes?.filter(d => d.low != null && d.close != null) || [];
+
+            if (bars.length === 0) {
+                console.warn(`  [${item.ticker}] 오늘 분봉 데이터 없음 (장 마감 또는 휴장)`);
+                continue;
+            }
+
+            // 당일 분봉 최저가 (low 기준)
+            const intradayLow = Math.min(...bars.map(d => d.low));
+            // 현재가: 마지막 봉의 close
+            const currentPrice = bars[bars.length - 1].close;
+
+            // 현재가가 최저가 대비 얼마나 위에 있는지 (%)
+            const gapFromLow = ((currentPrice - intradayLow) / intradayLow) * 100;
+
+            console.log(`  [${item.ticker}] 현재가: $${currentPrice}, 당일저점: $${intradayLow.toFixed(2)}, 저점대비: +${gapFromLow.toFixed(2)}%`);
+
+            if (gapFromLow <= threshold) {
+                alerts.push({
+                    ticker: item.ticker,
+                    name: item.name,
+                    sector: item.sector,
+                    marketType: 'US',
+                    price: currentPrice,
+                    intradayLow: parseFloat(intradayLow.toFixed(2)),
+                    gapFromLow: parseFloat(gapFromLow.toFixed(2)),
+                    barsCount: bars.length,
+                });
+            }
+
+            await delay(300);
+        } catch (err) {
+            console.error(`[${item.ticker}] 분봉 조회 실패:`, err.message);
+        }
+    }
+
+    console.log(`✅ [DEBUG] JYP 분봉 저점 감지 완료 (저점근접: ${alerts.length}건)`);
+    return alerts;
+}
+
 module.exports = {
     getUsTopVolumeList,
     getUsClosingBetList,
     getUsEnvelopeBetList,
-    getUsRsiList
+    getUsRsiList,
+    getJypPicksStatus,
+    getJypIntradayLowAlert
 };
