@@ -349,7 +349,9 @@ async function getJypIntradayLowAlert(threshold = 3) {
             const todayStart = new Date(now);
             const isDST = isUSEasternDST(now);
             todayStart.setUTCHours(isDST ? 13 : 14, 30, 0, 0);
-            console.log(`  [${item.ticker}] 장시작 기준: ${isDST ? '서머타임(13:30 UTC)' : '겨울타임(14:30 UTC)'}`);
+            // 한국 낮 시간대처럼 미장이 아직 열리지 않은 경우 → 전날 세션으로 당김
+            if (todayStart > now) todayStart.setUTCDate(todayStart.getUTCDate() - 1);
+            console.log(`  [${item.ticker}] 장시작 기준: ${isDST ? '서머타임(13:30 UTC)' : '겨울타임(14:30 UTC)'} / 세션: ${todayStart.toISOString()} ~ ${now.toISOString()}`);
 
             const chartResult = await yahooFinance.chart(item.ticker, {
                 period1: todayStart,
