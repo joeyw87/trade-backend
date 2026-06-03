@@ -14,6 +14,8 @@ const US_CLOSE_BET_URL  = 'https://trade-backend-3o2e.onrender.com/api/kis/us-cl
 const KR_RSI_URL        = 'https://trade-backend-3o2e.onrender.com/api/kis/kr-rsi';
 // 🇺🇸 미국주식 엔벨로프 & RSI & JYP픽: Yahoo → Render에서 차단되므로 로컬 직접 호출
 const usStockService = require('./services/usStockService');
+// 🔍 영무문 종목 발굴 스크리닝 (로컬 실행)
+const { runScreening } = require('./services/screening/screeningService');
 
 // Supabase DB정보 세팅 (7일동안 호출없으면 일시정지 되므로..)
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -333,6 +335,17 @@ client.on('messageCreate', async (message) => {
         await message.reply(`📊 [🇺🇸 미국주식 RSI 과매도] ${limit}개 종목 스캔 시작합니다.`);
         await sendDiscordHeartbeat('US_RSI', limit);
 
+    } else if (command === '!영무문') {
+        console.log(`[${time}] 유저 명령 수신: !영무문`);
+        await message.reply('🔍 [영무문] 종목 발굴 스크리닝 시작합니다. (골든크로스 → 기술/투자자 지표 → 네이버 스크래핑 순 분석, 약 5~10분 소요)');
+        try {
+            const result = await runScreening();
+            await discordService.sendMooScreeningMessage(result);
+        } catch (err) {
+            console.error(`[${time}] 영무문 스크리닝 실패:`, err.message);
+            await message.reply('❌ 스크리닝 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
+        }
+
     } else if (command === '!도움말' || command === '!사용법') {
         const helpText = `**🤖 영욱문AI비서 명령어 사용법**
 
@@ -380,6 +393,14 @@ client.on('messageCreate', async (message) => {
 └ 예: \`!미국JYP저점3\` → 저점 대비 +3% 이내 (기본값 3%)
 └ 예: \`!미국JYP저점5\` → 저점 대비 +5% 이내
 └ ⚠️ 미국 장 시간(KST 22:30~05:00) 중에만 의미 있는 데이터
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 **종목 발굴**
+━━━━━━━━━━━━━━━━━━━━━━━━
+\`!영무문\`
+└ 골든크로스 기본조건 통과 종목에 다중 지표 스코어링
+└ 정배열·거래량급증·외국인/기관순매수·RSI·목표가상향·컨센서스상회
+└ 8점 이상 종목만 영무문 채널 전송 (약 5~10분 소요)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 📌 \`!도움말\` 또는 \`!사용법\` 으로 이 화면을 다시 볼 수 있습니다.`;
