@@ -143,6 +143,7 @@ async function analyzeTechnicals(ticker, token) {
         volumeSpike,
         rsi,
         rsiMomentum,
+        currentPrice: Number(prices[0]?.stck_clpr) || 0,
         ma5:  ma5  ? Math.round(ma5)  : null,
         ma20: ma20 ? Math.round(ma20) : null,
         ma60: ma60 ? Math.round(ma60) : null,
@@ -182,4 +183,28 @@ async function getInvestorTrend(ticker, token) {
     }
 }
 
-module.exports = { analyzeTechnicals, getInvestorTrend };
+// ════════════════════════════════════════════════════════
+// 현재가 단일 조회 (FHKST01010100) — 영무문2용 경량 호출
+// ════════════════════════════════════════════════════════
+async function getStockCurrentPrice(ticker, token) {
+    try {
+        const res = await axios.get(
+            `${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/inquire-price`,
+            {
+                headers: getKisHeaders(token, 'FHKST01010100'),
+                params: { FID_COND_MRKT_DIV_CODE: 'J', FID_INPUT_ISCD: ticker },
+            }
+        );
+        const o = res.data.output;
+        if (!o) return null;
+        return {
+            price:      Number(o.stck_prpr),
+            changeRate: Number(o.prdy_ctrt),
+        };
+    } catch (err) {
+        console.warn(`  [${ticker}] 현재가 조회 실패:`, err.response?.data?.msg1 || err.message);
+        return null;
+    }
+}
+
+module.exports = { analyzeTechnicals, getInvestorTrend, getStockCurrentPrice };

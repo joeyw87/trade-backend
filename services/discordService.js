@@ -219,9 +219,11 @@ async function sendMooScreeningMessage(screeningResult) {
                     `📊RSI ${r.tech.rsi ?? 'N/A'}`,
                 ].join(' · ');
 
+                const reportUrl = `https://m.stock.naver.com/domestic/stock/${r.ticker}/research`;
+
                 let analystLine;
                 if (r.analyst.latestTarget == null) {
-                    analystLine = `🎯 목표가 리포트 없음`;
+                    analystLine = `[🎯 목표가 리포트 없음](${reportUrl})`;
                 } else {
                     const rangeStr = (r.analyst.min5 != null && r.analyst.max5 != null)
                         ? `범위: ${r.analyst.min5.toLocaleString()}~${r.analyst.max5.toLocaleString()}원`
@@ -236,10 +238,9 @@ async function sendMooScreeningMessage(screeningResult) {
                         : '';
 
                     if (r.analyst.totalCompared === 0) {
-                        // 동일 증권사 비교 불가 → 각 사 최신 목표가 나열
                         const singleList = r.analyst.singleFirms?.slice(0, 5)
                             .map(f => `${f.firm} ${f.price?.toLocaleString()}원`).join(' · ') || '';
-                        const lines = [`🎯 목표가 (증권사별 단일 리포트)`];
+                        const lines = [`[🎯 목표가 (증권사별 단일 리포트)](${reportUrl})`];
                         if (singleList) lines.push(`   ${singleList}`);
                         if (upsideStr)  lines.push(`   ${upsideStr}`);
                         if (rangeStr)   lines.push(`   ${rangeStr}`);
@@ -247,15 +248,20 @@ async function sendMooScreeningMessage(screeningResult) {
                     } else {
                         const icon  = r.analyst.targetRaised ? '✅' : r.analyst.targetDown ? '❌' : '➡️';
                         const label = r.analyst.targetRaised ? '상향 우세' : r.analyst.targetDown ? '하향 우세' : '유지';
-                        const counts = `${r.analyst.raised}개사↑ · ${r.analyst.dropped}개사↓`;
+                        const countParts = [];
+                        if (r.analyst.raised    > 0) countParts.push(`${r.analyst.raised}개사↑`);
+                        if (r.analyst.dropped   > 0) countParts.push(`${r.analyst.dropped}개사↓`);
+                        if (r.analyst.maintained > 0) countParts.push(`${r.analyst.maintained}개사→`);
+                        const counts = countParts.join(' · ') || '비교없음';
 
-                        // 증권사별 상세 (상향/하향만 표시, 유지는 축약)
-                        const upFirms   = r.analyst.firmDetails?.filter(f => f.includes('↑')).join(' · ') || '';
-                        const downFirms = r.analyst.firmDetails?.filter(f => f.includes('↓')).join(' · ') || '';
+                        const upFirms    = r.analyst.firmDetails?.filter(f => f.includes('↑')).join(' · ') || '';
+                        const downFirms  = r.analyst.firmDetails?.filter(f => f.includes('↓')).join(' · ') || '';
+                        const maintFirms = r.analyst.firmDetails?.filter(f => !f.includes('↑') && !f.includes('↓')).join(' · ') || '';
 
-                        const lines = [`🎯 목표가 ${label} ${icon}  ${counts}`];
-                        if (upFirms)   lines.push(`   ↑ ${upFirms}`);
-                        if (downFirms) lines.push(`   ↓ ${downFirms}`);
+                        const lines = [`[🎯 목표가 ${label} ${icon}](${reportUrl})  ${counts}`];
+                        if (upFirms)    lines.push(`   ↑ ${upFirms}`);
+                        if (downFirms)  lines.push(`   ↓ ${downFirms}`);
+                        if (maintFirms) lines.push(`   → ${maintFirms}`);
                         if (upsideStr) lines.push(`   ${upsideStr}`);
                         if (rangeStr)  lines.push(`   ${rangeStr}`);
                         analystLine = lines.join('\n');
@@ -310,9 +316,118 @@ async function sendMooScreeningMessage(screeningResult) {
     }
 }
 
+// ════════════════════════════════════════════════════════
+// 영무문2 — 최근 리포트 종목 순위 디스코드 전송
+// ════════════════════════════════════════════════════════
+// top10: [{ name, ticker, count, firmMap: { firm: { opinion, target } } }]
+// priceMap: { [ticker]: { price, changeRate } }
+// consensusMap: { [ticker]: consensus 객체 }
+async function sendMoo2Message(top10, priceMap = {}, consensusMap = {}) {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_MOO_URL;
+    if (!webhookUrl || top10.length === 0) return;
+
+    const today = new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' });
+
+    const lines = top10.map((s, i) => {
+        const researchUrl = s.ticker
+            ? `https://m.stock.naver.com/domestic/stock/${s.ticker}/research`
+            : `https://finance.naver.com/research/company_list.naver`;
+
+        // 현재가
+        const priceInfo = s.ticker ? priceMap[s.ticker] : null;
+        let priceStr = '';
+        if (priceInfo?.price) {
+            const sign  = priceInfo.changeRate >= 0 ? '+' : '';
+            const arrow = priceInfo.changeRate > 0 ? '🔺' : priceInfo.changeRate < 0 ? '🔻' : '➖';
+            priceStr = `💰 현재가: **${priceInfo.price.toLocaleString()}원** ${arrow}${sign}${priceInfo.changeRate}%`;
+        }
+
+        // 증권사별 투자의견 + 목표주가
+        const firmEntries = Object.entries(s.firmMap);
+        const firmParts = firmEntries
+            .map(([firm, info]) => {
+                const op = info.opinion || '';
+                const tg = info.target ? `${info.target.toLocaleString()}원` : '';
+                return [firm, op, tg].filter(Boolean).join(' ');
+            })
+            .filter(Boolean);
+        const firmStr = firmParts.length > 0 ? `\n   🏦 ${firmParts.join(' · ')}` : '';
+
+        // 목표가 범위 + 괴리율
+        const targets = firmEntries.map(([, info]) => info.target).filter(Boolean);
+        let targetRangeStr = '';
+        if (targets.length > 0) {
+            const minT = Math.min(...targets);
+            const maxT = Math.max(...targets);
+            if (priceInfo?.price) {
+                const upMax = (((maxT / priceInfo.price) - 1) * 100).toFixed(1);
+                const upMin = (((minT / priceInfo.price) - 1) * 100).toFixed(1);
+                targetRangeStr = `\n   🎯 ${minT.toLocaleString()}~${maxT.toLocaleString()}원 | 최고 ${upMax > 0 ? '+' : ''}${upMax}% / 최저 ${upMin > 0 ? '+' : ''}${upMin}%`;
+            } else {
+                targetRangeStr = `\n   🎯 ${minT.toLocaleString()}~${maxT.toLocaleString()}원`;
+            }
+        }
+
+        // 컨센서스 + PER/PBR
+        let consensusStr = '';
+        const cons = s.ticker ? consensusMap[s.ticker] : null;
+        if (cons?.actual != null) {
+            const beatIcon  = cons.beatConsensus ? '✅' : '❌';
+            const beatLabel = cons.beatConsensus ? '성장 기대' : '성장 기대 없음';
+            const chain = [`${cons.actualPeriod} **${cons.actual?.toLocaleString()}억**`];
+            if (cons.estRows?.length > 0) {
+                cons.estRows.forEach((row, idx) => {
+                    const prev  = idx === 0 ? cons.actual : cons.estRows[idx - 1].opProfit;
+                    const arrow = row.opProfit > prev ? '📈' : row.opProfit < prev ? '📉' : '➡️';
+                    chain.push(`${arrow} ${row.period} ${row.opProfit?.toLocaleString()}억`);
+                });
+            }
+            consensusStr = `\n   💰 ${beatLabel} ${beatIcon} ${chain.join(' → ')}`;
+        }
+
+        // PER 추이 + PBR
+        let valStr = '';
+        if (cons) {
+            const pers = cons.estPerRows || [];
+            let perStr = '';
+            if (pers.length >= 2) {
+                const isDown = pers.every((v, i) => i === 0 || v < pers[i - 1]);
+                const isUp   = pers.every((v, i) => i === 0 || v > pers[i - 1]);
+                const trend  = isDown ? ' ✅' : isUp ? ' ⚠️' : '';
+                perStr = `PER ${pers.join(' → ')}배${trend}`;
+            } else if (cons.forwardPer != null) {
+                perStr = `PER ${cons.forwardPer}배`;
+            }
+            const parts = [];
+            if (perStr) parts.push(perStr);
+            if (cons.forwardPbr != null) parts.push(`PBR ${cons.forwardPbr}배`);
+            if (parts.length > 0) valStr = `\n   📊 ${parts.join(' | ')}`;
+        }
+
+        return `**${i + 1}. [${s.name}](${researchUrl}) (${s.count}건)**${priceStr}${firmStr}${targetRangeStr}${valStr}${consensusStr}`;
+    });
+
+    const totalReports = top10.reduce((sum, s) => sum + s.count, 0);
+    const embed = {
+        title: `📋 [영무문2] 최근 리포트 종목 상위 순위 12 — ${today} (${totalReports}건 분석)`,
+        description: lines.join('\n\n'),
+        color: 3447003,
+        footer: { text: '종목명을 터치하면 네이버 리서치로 이동합니다.' },
+        timestamp: new Date().toISOString(),
+    };
+
+    try {
+        await axios.post(webhookUrl, { embeds: [embed] });
+        console.log('✅ [디스코드] 영무문2 결과 전송 완료!');
+    } catch (error) {
+        console.error('❌ [디스코드] 영무문2 전송 실패:', error.message);
+    }
+}
+
 module.exports = {
     sendDiscordMessage,
     sendJypPicksMessage,
     sendJypIntradayAlertMessage,
     sendMooScreeningMessage,
+    sendMoo2Message,
 };

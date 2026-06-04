@@ -101,7 +101,7 @@ async function runScreening() {
             if (!grade) {
                 if (isBypassed) {
                     results.push({
-                        ticker, name, price: stock.price,
+                        ticker, name, price: stock.price || tech.currentPrice || 0,
                         score, grade: 'DEBUG', breakdown,
                         tech, investor,
                         analyst: analystData,
@@ -115,7 +115,7 @@ async function runScreening() {
             results.push({
                 ticker,
                 name,
-                price: stock.price,
+                price: stock.price || tech.currentPrice || 0,
                 score,
                 grade,
                 breakdown,

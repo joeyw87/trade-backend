@@ -346,6 +346,87 @@ client.on('messageCreate', async (message) => {
             await message.reply('❌ 스크리닝 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
         }
 
+    } else if (command === '!영무문2') {
+        console.log(`[${time}] 유저 명령 수신: !영무문2`);
+        await message.reply('📋 [영무문2] 네이버 최근 리포트 90건 분석 중입니다. (약 1~2분 소요)');
+        try {
+            const { scrapeRecentReports, scrapeReportDetail, scrapeConsensus, delay: nd } = require('./services/screening/naverScraper');
+            const { getStockCurrentPrice } = require('./services/screening/technicalService');
+            const { getKisAccessToken: getToken } = require('./kisAuth');
+
+            // 1. 리스트 수집
+            const rows = await scrapeRecentReports(90);
+
+            // 2. 종목별 그룹핑 — 증권사별 최신 리포트 href 1개만 보존
+            const stockMap = {};
+            for (const row of rows) {
+                if (!stockMap[row.name]) {
+                    stockMap[row.name] = { name: row.name, ticker: row.ticker, count: 0, firmMap: {} };
+                }
+                const s = stockMap[row.name];
+                s.count++;
+                if (row.firm && !s.firmMap[row.firm]) {
+                    s.firmMap[row.firm] = { href: row.reportHref, opinion: null, target: null };
+                }
+            }
+
+            // 3. 상위 15종목
+            const top15 = Object.values(stockMap)
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 15);
+
+            // 4. 각 증권사 최신 리포트 상세 조회 (투자의견 + 목표주가)
+            for (const stock of top15) {
+                for (const info of Object.values(stock.firmMap)) {
+                    if (info.href) {
+                        const detail = await scrapeReportDetail(info.href);
+                        info.opinion = detail.opinion;
+                        info.target  = detail.target;
+                        await nd(400);
+                    }
+                }
+            }
+
+            // 5. 현재가 조회
+            const token = await getToken();
+            const priceMap = {};
+            for (const stock of top15) {
+                if (stock.ticker) {
+                    const info = await getStockCurrentPrice(stock.ticker, token);
+                    if (info) priceMap[stock.ticker] = info;
+                    await nd(300);
+                }
+            }
+
+            // 6. 컨센서스 조회
+            const consensusMap = {};
+            for (const stock of top15) {
+                if (stock.ticker) {
+                    consensusMap[stock.ticker] = await scrapeConsensus(stock.ticker);
+                    await nd(500);
+                }
+            }
+
+            // 7. 재정렬: 건수 동일 시 최고 목표가 괴리율(상승여력) 큰 순
+            top15.sort((a, b) => {
+                if (b.count !== a.count) return b.count - a.count;
+                const pa = priceMap[a.ticker]?.price;
+                const pb = priceMap[b.ticker]?.price;
+                const maxTa = Math.max(0, ...Object.values(a.firmMap).map(f => f.target || 0));
+                const maxTb = Math.max(0, ...Object.values(b.firmMap).map(f => f.target || 0));
+                const upsideA = (pa && maxTa) ? (maxTa / pa - 1) : -Infinity;
+                const upsideB = (pb && maxTb) ? (maxTb / pb - 1) : -Infinity;
+                return upsideB - upsideA;
+            });
+            const top10 = top15.slice(0, 12);
+
+            // 8. 디스코드 전송
+            await discordService.sendMoo2Message(top10, priceMap, consensusMap);
+        } catch (err) {
+            console.error(`[${time}] 영무문2 실패:`, err.message);
+            await message.reply('❌ 리포트 수집 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
+        }
+
     } else if (command === '!도움말' || command === '!사용법') {
         const helpText = `**🤖 영욱문AI비서 명령어 사용법**
 
@@ -401,6 +482,10 @@ client.on('messageCreate', async (message) => {
 └ 골든크로스 기본조건 통과 종목에 다중 지표 스코어링
 └ 정배열·거래량급증·외국인/기관순매수·RSI·목표가상향·컨센서스상회
 └ 8점 이상 종목만 영무문 채널 전송 (약 5~10분 소요)
+
+\`!영무문2\`
+└ 네이버 종목분석 리포트 최근 60건 수집
+└ 종목별 그룹핑 후 리포트 수 순위 + 목표주가 범위 표시
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 📌 \`!도움말\` 또는 \`!사용법\` 으로 이 화면을 다시 볼 수 있습니다.`;

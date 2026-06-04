@@ -155,48 +155,54 @@ function _emptyTarget() {
 // ════════════════════════════════════════════════════════
 async function scrapeConsensus(ticker) {
     try {
-        const res = await axios.get('https://navercomp.wisereport.co.kr/company/cF1002.aspx', {
+        const sDT = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        const res = await axios.get('https://navercomp.wisereport.co.kr/company/ajax/c1050001_data.aspx', {
             headers: { ...NAVER_HEADERS, 'X-Requested-With': 'XMLHttpRequest',
                 Referer: `https://navercomp.wisereport.co.kr/v2/company/c1050001.aspx?cmp_cd=${ticker}` },
-            params: { cmp_cd: ticker, finGubun: 'IFRSL' },
+            params: { flag: '2', cmp_cd: ticker, finGubun: 'IFRSL', frq: '0', sDT },
             timeout: 10000,
         });
 
-        const html = Object.values(res.data).join('');
-        const $ = cheerio.load(html);
-
-        // (A)=실적, (E)=컨센서스 행 파싱 (영업이익: col[3])
-        const actualRows = [];
-        const estRows    = [];
-
-        $('table').first().find('tbody tr').each((_, row) => {
-            const cols = $(row).find('td');
-            if (cols.length < 4) return;
-
-            const period    = $(cols[0]).text().trim(); // 예: "2025(A)", "2026(E)"
-            const opProfit  = parseKorNum($(cols[3]).text().trim());
-
-            if (!period || opProfit === null) return;
-
-            if (period.includes('(A)')) actualRows.push({ period, opProfit });
-            if (period.includes('(E)')) estRows.push({ period, opProfit });
-        });
-
-        console.log(`  [${ticker}] 실적 rows: ${actualRows.map(r=>r.period+'='+r.opProfit).join(', ')}`);
-        console.log(`  [${ticker}] 추정 rows: ${estRows.map(r=>r.period+'='+r.opProfit).join(', ')}`);
-
-        if (actualRows.length === 0 || estRows.length === 0) {
+        const data = res.data?.JsonData;
+        if (!Array.isArray(data) || data.length === 0) {
             return { beatConsensus: false, actual: null, consensus: null, estTrend: null };
         }
 
-        // 가장 최근 (A) vs 가장 빠른 (E)
+        const actualRows = [];
+        const estRows    = [];
+
+        for (const v of data) {
+            const period   = v.YYMM?.trim();
+            const opProfit = parseKorNum(String(v.OP ?? ''));
+            if (!period || opProfit === null) continue;
+            if (period.includes('(A)')) actualRows.push({ period, opProfit });
+            if (period.includes('(E)')) estRows.push({ period, opProfit });
+        }
+
+        // (E) 행 전체에서 PER 추이 + 첫 번째 (E) 행 PBR 추출
+        const estPerRows = [];
+        let forwardPbr = null;
+        for (const v of data) {
+            if (!v.YYMM?.includes('(E)')) continue;
+            const per = parseKorNum(String(v.PER ?? ''));
+            if (per != null && per > 0) estPerRows.push(per);
+            if (forwardPbr === null) forwardPbr = parseKorNum(String(v.PBR ?? ''));
+        }
+        const forwardPer = estPerRows[0] ?? null;
+
+        console.log(`  [${ticker}] 실적 rows: ${actualRows.map(r=>r.period+'='+r.opProfit).join(', ')}`);
+        console.log(`  [${ticker}] 추정 rows: ${estRows.map(r=>r.period+'='+r.opProfit).join(', ')}`);
+        console.log(`  [${ticker}] PER=${forwardPer} PBR=${forwardPbr}`);
+
+        if (actualRows.length === 0 || estRows.length === 0) {
+            return { beatConsensus: false, actual: null, consensus: null, estTrend: null, forwardPer, forwardPbr };
+        }
+
         const latestActual = actualRows[actualRows.length - 1];
         const earliestEst  = estRows[0];
-        // E > A → 애널리스트가 추가 성장을 기대하는 종목
         const beatConsensus = earliestEst.opProfit > latestActual.opProfit;
 
-        // (E) 여러 개 → 영업이익 증가 추세 체크
-        let estTrend = null; // 'up' | 'flat' | 'down' | null
+        let estTrend = null;
         if (estRows.length >= 2) {
             const increasing = estRows.every((r, i) => i === 0 || r.opProfit > estRows[i - 1].opProfit);
             const decreasing = estRows.every((r, i) => i === 0 || r.opProfit < estRows[i - 1].opProfit);
@@ -211,6 +217,9 @@ async function scrapeConsensus(ticker) {
             consPeriod: earliestEst.period,
             estTrend,
             estRows,
+            estPerRows,
+            forwardPer,
+            forwardPbr,
         };
     } catch (err) {
         console.warn(`  [${ticker}] 컨센서스 스크래핑 실패:`, err.message);
@@ -233,4 +242,101 @@ function parseNaverDate(str) {
     return new Date(`20${m[1]}-${m[2]}-${m[3]}`);
 }
 
-module.exports = { scrapeAnalystTarget, scrapeConsensus, delay };
+// ════════════════════════════════════════════════════════
+// [영무문2] 최근 리포트 목록 수집
+// 각 행: 종목명, 티커, 증권사, 리포트href, 작성일
+// ════════════════════════════════════════════════════════
+async function scrapeRecentReports(count = 60) {
+    const allRows = [];
+    const pageSize = 30;
+    const pagesToFetch = Math.ceil(count / pageSize);
+
+    for (let page = 1; page <= pagesToFetch; page++) {
+        try {
+            const url = `https://finance.naver.com/research/company_list.naver?page=${page}`;
+            const html = await fetchEucKr(url);
+            const $ = cheerio.load(html);
+
+            $('table').first().find('tbody tr').each((_, row) => {
+                const tds = $(row).find('td');
+                if (tds.length < 5) return;
+
+                const nameAnchor = $(tds[0]).find('a');
+                const name = nameAnchor.text().trim();
+                if (!name) return;
+
+                const nameHref = nameAnchor.attr('href') || '';
+                const tickerMatch = nameHref.match(/code=(\d+)/);
+                const ticker = tickerMatch ? tickerMatch[1] : null;
+
+                const firm = $(tds[2]).text().trim();
+                const dateStr = $(tds[4]).text().trim();
+
+                // 리포트 상세 링크
+                const reportHref = $(tds[1]).find('a').attr('href') || '';
+                const fullHref = reportHref.startsWith('http')
+                    ? reportHref
+                    : `https://finance.naver.com/research/${reportHref}`;
+
+                if (name && firm) {
+                    allRows.push({ name, ticker, firm, reportHref: fullHref, date: dateStr });
+                }
+            });
+
+            if (page < pagesToFetch) await delay(600);
+        } catch (err) {
+            console.warn(`[영무문2] 페이지 ${page} 조회 실패:`, err.message);
+        }
+    }
+
+    console.log(`[영무문2] 총 ${allRows.length}건 수집 완료`);
+    return allRows.slice(0, count);
+}
+
+// ════════════════════════════════════════════════════════
+// [영무문2] 리포트 상세 페이지에서 투자의견 + 목표주가 추출
+// ════════════════════════════════════════════════════════
+async function scrapeReportDetail(href) {
+    try {
+        const html = await fetchEucKr(href);
+        const $ = cheerio.load(html);
+
+        let target = null;
+        let opinion = null;
+
+        // th/td 쌍으로 된 테이블에서 레이블 기반 추출
+        $('table').first().find('tr').each((_, tr) => {
+            $(tr).find('th').each((i, th) => {
+                const label = $(th).text().trim();
+                const val   = $($(tr).find('td')[i]).text().trim();
+                if (!opinion && label.includes('투자의견')) opinion = val;
+                if (!target  && (label.includes('목표주가') || label.includes('목표가'))) {
+                    const n = Number(val.replace(/[^0-9]/g, ''));
+                    if (n > 0) target = n;
+                }
+            });
+        });
+
+        // th/td 쌍으로 못 찾으면 전체 텍스트 패턴 매칭
+        if (!target || !opinion) {
+            $('table').first().find('td').each((_, td) => {
+                const text = $(td).text().trim();
+                if (!target) {
+                    const m = text.match(/목표(?:주가|가)\s*([\d,]+)/);
+                    if (m) target = Number(m[1].replace(/,/g, ''));
+                }
+                if (!opinion) {
+                    const m = text.match(/투자의견\s*([가-힣A-Za-z]+)/);
+                    if (m) opinion = m[1];
+                }
+            });
+        }
+
+        return { target, opinion };
+    } catch (err) {
+        console.warn(`[영무문2] 리포트 상세 조회 실패:`, err.message);
+        return { target: null, opinion: null };
+    }
+}
+
+module.exports = { scrapeAnalystTarget, scrapeConsensus, scrapeRecentReports, scrapeReportDetail, delay };
