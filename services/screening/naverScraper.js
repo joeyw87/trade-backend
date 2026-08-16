@@ -29,14 +29,15 @@ async function fetchEucKr(url) {
 //   3. 증권사별 그룹핑 후 각 사의 최신 vs 직전 목표가 비교
 //   4. 상향/하향/유지 건수 집계 → 과반 방향으로 판단
 // ════════════════════════════════════════════════════════
-async function scrapeAnalystTarget(ticker) {
+async function scrapeAnalystTarget(ticker, { maxDaysOld = 90 } = {}) {
     try {
         const listUrl = `https://finance.naver.com/research/company_list.naver?searchType=itemCode&itemCode=${ticker}`;
         const listHtml = await fetchEucKr(listUrl);
         const $ = cheerio.load(listHtml);
 
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - 90); // 90일 이내 리포트 대상
+        const cutoff = maxDaysOld != null
+            ? new Date(Date.now() - maxDaysOld * 86400000)
+            : null;
 
         const reports = [];
         $('table').first().find('tbody tr').each((_, row) => {
@@ -47,25 +48,27 @@ async function scrapeAnalystTarget(ticker) {
             const firm    = $(tds[2]).text().trim();
             if (!href || !dateStr) return;
             const reportDate = parseNaverDate(dateStr);
-            if (!reportDate || reportDate < cutoff) return;
+            if (!reportDate) return;
+            if (cutoff && reportDate < cutoff) return;
             reports.push({
                 href: href.startsWith('http') ? href : `https://finance.naver.com/research/${href}`,
                 date: reportDate,
+                rawDateStr: dateStr,
                 firm,
             });
         });
 
-        console.log(`  [${ticker}] 최근 90일 리포트: ${reports.length}건`);
+        console.log(`  [${ticker}] 리포트 ${reports.length}건 수집 (기준: ${maxDaysOld != null ? `${maxDaysOld}일 이내` : '제한없음'})`);
 
         if (reports.length === 0) {
             return _emptyTarget();
         }
 
-        // 최신순 정렬 후 최대 10개 상세 조회
+        // 최신순 정렬 후 최대 20개 상세 조회
         reports.sort((a, b) => b.date - a.date);
         const targets = [];
 
-        for (const report of reports.slice(0, 10)) {
+        for (const report of reports.slice(0, 20)) {
             try {
                 const detailHtml = await fetchEucKr(report.href);
                 const $d = cheerio.load(detailHtml);
@@ -105,8 +108,10 @@ async function scrapeAnalystTarget(ticker) {
 
         // 비교 불가 단일 리포트 증권사 (최신 목표가만 보유)
         const singleFirms = [];
+        const firmDatesMap = {};
         for (const [firm, list] of Object.entries(firmMap)) {
-            if (list.length === 1) singleFirms.push({ firm, price: list[0].price });
+            if (list[0]?.rawDateStr) firmDatesMap[firm] = list[0].rawDateStr;
+            if (list.length === 1) singleFirms.push({ firm, price: list[0].price, dateStr: list[0].rawDateStr });
         }
 
         // 최근 5건 최저/최고 (참고용)
@@ -126,7 +131,9 @@ async function scrapeAnalystTarget(ticker) {
             totalCompared,
             firmDetails,
             singleFirms,
-            latestTarget: targets[0].price,
+            firmDatesMap,
+            latestTarget:      targets[0].price,
+            latestReportDate:  reports[0]?.date ?? null,
             min5,
             max5,
         };
@@ -137,7 +144,7 @@ async function scrapeAnalystTarget(ticker) {
 }
 
 function _emptyTarget() {
-    return { targetRaised: false, targetDown: false, raised: 0, dropped: 0, maintained: 0, totalCompared: 0, firmDetails: [], latestTarget: null, min5: null, max5: null };
+    return { targetRaised: false, targetDown: false, raised: 0, dropped: 0, maintained: 0, totalCompared: 0, firmDetails: [], singleFirms: [], firmDatesMap: {}, latestTarget: null, latestReportDate: null, min5: null, max5: null };
 }
 
 // ════════════════════════════════════════════════════════
@@ -339,4 +346,171 @@ async function scrapeReportDetail(href) {
     }
 }
 
-module.exports = { scrapeAnalystTarget, scrapeConsensus, scrapeRecentReports, scrapeReportDetail, delay };
+// ════════════════════════════════════════════════════════
+// 배당 정보 조회 (네이버 모바일 연간재무 API)
+// 반환: { latestDps, latestFiscalYear, forwardDps, forwardFiscalYear, dpsHistory }
+// ════════════════════════════════════════════════════════
+async function scrapeDividendInfo(ticker) {
+    try {
+        const res = await axios.get(`https://m.stock.naver.com/api/stock/${ticker}/finance/annual`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15',
+                Accept: 'application/json',
+                Referer: 'https://m.stock.naver.com/',
+            },
+            timeout: 8000,
+        });
+
+        const financeInfo = res.data?.financeInfo;
+        if (!financeInfo) return null;
+
+        const titles = financeInfo.trTitleList || [];
+        const rows   = financeInfo.rowList   || [];
+
+        const dpsRow = rows.find(r => r.title === '주당배당금');
+        if (!dpsRow) return null;
+
+        const parseVal = (v) => {
+            if (!v || v === '-') return null;
+            const n = Number(String(v).replace(/,/g, ''));
+            return isNaN(n) ? null : n;
+        };
+
+        const actualCols    = titles.filter(t => t.isConsensus === 'N');
+        const consensusCols = titles.filter(t => t.isConsensus === 'Y');
+
+        // 최근 실적 DPS
+        const latestActual    = actualCols[actualCols.length - 1];
+        const latestDps       = latestActual ? parseVal(dpsRow.columns[latestActual.key]?.value) : null;
+        const latestFiscalYear = latestActual?.title?.trim() || null;
+
+        // 컨센서스 예상 DPS
+        const firstConsensus  = consensusCols[0];
+        const forwardDps      = firstConsensus ? parseVal(dpsRow.columns[firstConsensus.key]?.value) : null;
+        const forwardFiscalYear = firstConsensus?.title?.trim() || null;
+
+        // DPS 추이 (실적 최근 3개년)
+        const dpsHistory = actualCols.slice(-3).map(t => ({
+            year: t.title,
+            dps:  parseVal(dpsRow.columns[t.key]?.value),
+        })).filter(h => h.dps !== null);
+
+        console.log(`  [${ticker}] DPS: ${dpsHistory.map(h=>h.year+' '+h.dps).join(' → ')} | 예상: ${forwardDps}`);
+        return { latestDps, latestFiscalYear, forwardDps, forwardFiscalYear, dpsHistory };
+    } catch (err) {
+        console.warn(`  [${ticker}] 배당 정보 조회 실패:`, err.message);
+        return null;
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// WiseReport 리포트 서머리 수집 (기업 탭)
+// URL: https://comp.wisereport.co.kr/wiseReport/summary/ReportSummary.aspx?fmt=1
+// 반환: [{ name, ticker, firm, analyst, opinion, targetPx, prevPx, title, points, upside }]
+// ════════════════════════════════════════════════════════
+async function scrapeWiseReportSummary() {
+    try {
+        const res = await axios.get(
+            'https://comp.wisereport.co.kr/wiseReport/summary/ReportSummary.aspx?fmt=1',
+            {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                    Referer: 'https://comp.wisereport.co.kr/',
+                    'Accept-Language': 'ko-KR,ko;q=0.9',
+                },
+                timeout: 10000,
+            }
+        );
+        const $ = cheerio.load(res.data);
+        const reports = [];
+        const seen    = new Set();
+
+        // 데이터 행: <th>(기업명,기관명) + <td>(투자의견,목표가,전일가,제목,요약)
+        // row class: itm_t1, itm_t2 등
+        $('tr.itm_t1, tr.alt_t1').each((_, tr) => {
+            const cells = $(tr).children('th, td');
+            if (cells.length < 7) return;
+
+            const stockCell = $(cells[0]).text().trim().replace(/\s+/g, ' ');
+            const tickerMatch = stockCell.match(/\((\d{6})\)/);
+            if (!tickerMatch) return;
+
+            const ticker = tickerMatch[1];
+            if (seen.has(ticker)) return;
+            seen.add(ticker);
+
+            const name     = stockCell.replace(/\s*\(\d{6}\)/, '').trim();
+            const firmRaw  = $(cells[1]).text().trim().replace(/\s+/g, ' ');
+            const firmMatch    = firmRaw.match(/^(.+?)\s*[\[【\[]/);
+            const firm         = firmMatch?.[1]?.trim() || firmRaw.split(/[\[【]/)[0].trim();
+            const analystMatch = firmRaw.match(/[\[【\[](.+?)[\]】\]]/);
+            const analyst      = analystMatch?.[1]?.trim() || '';
+            const opinion      = $(cells[2]).text().trim();
+            const targetPx     = Number($(cells[3]).text().replace(/[^0-9]/g, '')) || null;
+            const prevPx       = Number($(cells[4]).text().replace(/[^0-9]/g, '')) || null;
+            const title        = $(cells[5]).text().trim().replace(/\s+/g, ' ');
+            const summaryRaw   = $(cells[6]).text().trim();
+            const points       = summaryRaw.split('▶').map(s => s.trim()).filter(Boolean);
+            const upside       = (targetPx && prevPx) ? ((targetPx / prevPx - 1) * 100) : null;
+
+            reports.push({ name, ticker, firm, analyst, opinion, targetPx, prevPx, title, points, upside });
+        });
+
+        console.log(`[WiseReport] 기업 리포트 ${reports.length}건 수집`);
+        return reports;
+    } catch (err) {
+        console.warn('[WiseReport] 서머리 수집 실패:', err.message);
+        return [];
+    }
+}
+
+// ════════════════════════════════════════════════════════
+// WiseReport 산업 리포트 서머리 수집 (산업 탭)
+// URL: https://comp.wisereport.co.kr/wiseReport/summary/ReportSummary.aspx?fmt=2
+// 반환: [{ industry, firm, analyst, opinion, prevOpinion, title, points }]
+// ════════════════════════════════════════════════════════
+async function scrapeWiseReportIndustrySummary() {
+    try {
+        const res = await axios.get(
+            'https://comp.wisereport.co.kr/wiseReport/summary/ReportSummary.aspx?fmt=2',
+            {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                    Referer: 'https://comp.wisereport.co.kr/',
+                    'Accept-Language': 'ko-KR,ko;q=0.9',
+                },
+                timeout: 10000,
+            }
+        );
+        const $ = cheerio.load(res.data);
+        const reports = [];
+
+        $('tr.itm_t1, tr.alt_t1').each((_, tr) => {
+            const cells = $(tr).children('th, td');
+            if (cells.length < 6) return;
+
+            const industry   = $(cells[0]).text().trim().replace(/\s+/g, ' ');
+            const firmRaw    = $(cells[1]).text().trim().replace(/\s+/g, ' ');
+            const firmMatch    = firmRaw.match(/^(.+?)\s*[\[【]/);
+            const firm         = firmMatch?.[1]?.trim() || firmRaw.split(/[\[【]/)[0].trim();
+            const analystMatch = firmRaw.match(/[\[【](.+?)[\]】]/);
+            const analyst      = analystMatch?.[1]?.trim() || '';
+            const opinion      = $(cells[2]).text().trim();
+            const prevOpinion  = $(cells[3]).text().trim();
+            const title        = $(cells[4]).text().trim().replace(/\s+/g, ' ');
+            const summaryRaw   = $(cells[5]).text().trim();
+            const points       = summaryRaw.split('▶').map(s => s.trim()).filter(Boolean);
+
+            if (!industry) return;
+            reports.push({ industry, firm, analyst, opinion, prevOpinion, title, points });
+        });
+
+        console.log(`[WiseReport] 산업 리포트 ${reports.length}건 수집`);
+        return reports;
+    } catch (err) {
+        console.warn('[WiseReport] 산업 서머리 수집 실패:', err.message);
+        return [];
+    }
+}
+
+module.exports = { scrapeAnalystTarget, scrapeConsensus, scrapeRecentReports, scrapeReportDetail, scrapeDividendInfo, scrapeWiseReportSummary, scrapeWiseReportIndustrySummary, delay };

@@ -107,6 +107,33 @@ function checkGoldenCross(prices) {
 }
 
 // ════════════════════════════════════════════════════════
+// 주가 모멘텀 — 기간별 수익률 (prices: 최신순 배열)
+// ════════════════════════════════════════════════════════
+function calcMomentum(prices) {
+    const current = Number(prices[0].stck_clpr);
+    const r = (idx) => prices.length > idx
+        ? parseFloat(((current / Number(prices[idx].stck_clpr) - 1) * 100).toFixed(1))
+        : null;
+    return { w1: r(5), m1: r(20), m3: r(60) };  // 1주(5일) / 1개월(20일) / 3개월(60일)
+}
+
+// ════════════════════════════════════════════════════════
+// 볼린저밴드 (20일, 2σ)
+// ════════════════════════════════════════════════════════
+function calcBollinger(prices, period = 20) {
+    if (prices.length < period) return null;
+    const closes = prices.slice(0, period).map(d => Number(d.stck_clpr));
+    const ma  = closes.reduce((a, b) => a + b, 0) / period;
+    const std = Math.sqrt(closes.reduce((s, p) => s + Math.pow(p - ma, 2), 0) / period);
+    const upper = Math.round(ma + 2 * std);
+    const lower = Math.round(ma - 2 * std);
+    const mid   = Math.round(ma);
+    const current  = Number(prices[0].stck_clpr);
+    const position = upper !== lower ? Math.round((current - lower) / (upper - lower) * 100) : 50;
+    return { upper, mid, lower, position };
+}
+
+// ════════════════════════════════════════════════════════
 // 기술적 지표 종합 분석
 // ════════════════════════════════════════════════════════
 async function analyzeTechnicals(ticker, token) {
@@ -136,6 +163,9 @@ async function analyzeTechnicals(ticker, token) {
     const rsi = calcRSI(prices);
     const rsiMomentum = rsi !== null && rsi >= 50 && rsi <= 65;
 
+    const momentum  = calcMomentum(prices);
+    const bollinger = calcBollinger(prices);
+
     return {
         valid: true,
         goldenCross,
@@ -147,6 +177,8 @@ async function analyzeTechnicals(ticker, token) {
         ma5:  ma5  ? Math.round(ma5)  : null,
         ma20: ma20 ? Math.round(ma20) : null,
         ma60: ma60 ? Math.round(ma60) : null,
+        momentum,
+        bollinger,
     };
 }
 
@@ -198,6 +230,7 @@ async function getStockCurrentPrice(ticker, token) {
         const o = res.data.output;
         if (!o) return null;
         return {
+            name:       o.hts_kor_isnm?.trim() || null,
             price:      Number(o.stck_prpr),
             changeRate: Number(o.prdy_ctrt),
         };
@@ -207,4 +240,32 @@ async function getStockCurrentPrice(ticker, token) {
     }
 }
 
-module.exports = { analyzeTechnicals, getInvestorTrend, getStockCurrentPrice };
+// ════════════════════════════════════════════════════════
+// 매도 타이밍 분석 — 저항선·피보나치·RSI 종합
+// ════════════════════════════════════════════════════════
+async function analyzeSellSignals(ticker, token) {
+    const prices = await getDailyPrices(ticker, token);
+    if (prices.length < 22) return null;
+
+    const currentPrice = Number(prices[0].stck_clpr);
+
+    const ma20  = prices.length >= 20  ? Math.round(calcMA(prices, 20))  : null;
+    const ma60  = prices.length >= 60  ? Math.round(calcMA(prices, 60))  : null;
+    const ma120 = prices.length >= 120 ? Math.round(calcMA(prices, 120)) : null;
+    const ma240 = prices.length >= 240 ? Math.round(calcMA(prices, 240)) : null;
+    const rsi   = calcRSI(prices);
+
+    // 최근 고점 / 저점 (수집된 전체 데이터 기준, 약 7개월)
+    const recentHigh = Math.max(...prices.map(d => Number(d.stck_hgpr || d.stck_clpr)));
+    const recentLow  = Math.min(...prices.map(d => Number(d.stck_lwpr || d.stck_clpr)));
+
+    // 피보나치 확장 (최근 저점 → 최근 고점 기준)
+    const fibRange = recentHigh - recentLow;
+    const fib382 = Math.round(recentHigh + fibRange * 0.382);
+    const fib618 = Math.round(recentHigh + fibRange * 0.618);
+    const fib100 = Math.round(recentHigh + fibRange * 1.0);
+
+    return { currentPrice, ma20, ma60, ma120, ma240, rsi, recentHigh, recentLow, fib382, fib618, fib100 };
+}
+
+module.exports = { analyzeTechnicals, getInvestorTrend, getStockCurrentPrice, analyzeSellSignals };

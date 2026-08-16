@@ -181,7 +181,8 @@ async function sendDiscordHeartbeat(strategyType, limit = 200, silent = true) {
 //   - 엔벨로프: 22:30, 00:30, 02:30
 //   - 종가베팅: 04:50, 05:05 (서머타임 장마감 직전/직후)
 // ════════════════════════════════════════════════════════
-let lastSentTime = ""; // 중복 발송 방지
+let lastSentTime = "";        // 중복 발송 방지
+let lastWiseReportDate = ""; // 영욱문 리포트 자동 브리핑 날짜 추적
 
 setInterval(() => {
     const now = new Date();
@@ -196,6 +197,29 @@ setInterval(() => {
     const formattedHour = String(hour).padStart(2, '0');
     const formattedMinute = String(minute).padStart(2, '0');
     const currentTime = `${formattedHour}:${formattedMinute}`;
+
+    // ── 평일 08:00 영욱문 리포트 자동 브리핑 ──
+    if (currentTime === '08:00' && day >= 1 && day <= 5) {
+        const todayStr = now.toISOString().slice(0, 10);
+        if (lastWiseReportDate !== todayStr) {
+            lastWiseReportDate = todayStr;
+            console.log(`\n⏰ [${now.toLocaleTimeString()}] 영욱문 리포트 자동 브리핑 시작`);
+            (async () => {
+                try {
+                    const { scrapeWiseReportSummary, scrapeWiseReportIndustrySummary } = require('./services/screening/naverScraper');
+                    const [companyReports, industryReports] = await Promise.all([
+                        scrapeWiseReportSummary(),
+                        scrapeWiseReportIndustrySummary(),
+                    ]);
+                    if (companyReports.length)  await discordService.sendWiseReportSummaryMessage(companyReports);
+                    if (industryReports.length) await discordService.sendWiseReportIndustrySummaryMessage(industryReports);
+                    console.log('✅ 영욱문 리포트 자동 브리핑 완료');
+                } catch (err) {
+                    console.error('❌ 영욱문 리포트 자동 브리핑 실패:', err.message);
+                }
+            })();
+        }
+    }
 
     if (lastSentTime === currentTime) return;
 
@@ -427,6 +451,259 @@ client.on('messageCreate', async (message) => {
             await message.reply('❌ 리포트 수집 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
         }
 
+    } else if (command.startsWith('!매도')) {
+        if (command === '!매도사용법' || command === '!매도도움말') {
+        const sellHelp = `**📤 매도 타이밍 분석 사용법 & 판단 기준**
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📌 **명령어**
+━━━━━━━━━━━━━━━━━━━━━━━━
+\`!매도종목명\`
+└ 예) \`!매도삼성전자\`, \`!매도005930\`
+
+\`!매도종목명 매수가\`
+└ 예) \`!매도삼성전자 70000\`
+└ 매수가 입력 시 정확한 손절 라인 계산
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 **분할 매도 전략**
+━━━━━━━━━━━━━━━━━━━━━━━━
+**1차 매도 (30% 물량)**
+└ 현재가 바로 위 첫 번째 저항선
+└ 근거: MA20, MA60, 피보나치 38.2%
+└ 목적: 단기 이익 확보, 리스크 축소
+
+**2차 매도 (30% 물량)**
+└ 중기 저항선 또는 전고점
+└ 근거: MA120, 최근 고점, 피보나치 61.8%, 목표가 하단
+└ 목적: 중기 수익 실현
+
+**3차 매도 (나머지 40%)**
+└ 장기 목표 완료 구간
+└ 근거: MA240, 피보나치 100%, 목표가 상단
+└ 목적: 최대 수익 실현
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔴 **손절 라인 판단 기준**
+━━━━━━━━━━━━━━━━━━━━━━━━
+└ 매수가 입력 시: 매수가 -5% 또는 MA60 이탈 중 유리한 쪽
+└ 매수가 없을 시: MA20 또는 MA60 이탈가의 -1%
+└ **손절선 돌파 시 즉시 매도 원칙**
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📊 **기술 지표 해석**
+━━━━━━━━━━━━━━━━━━━━━━━━
+**RSI (과매수/과매도 지수)**
+└ 🟢 60 미만: 정상 범위, 추가 상승 여력
+└ 🟡 60~70: 상승 추세, 경계 시작
+└ 🟠 70~80: 과매수 경계, 1~2차 익절 고려
+└ 🔴 80 이상: 과매수 강함, 단기 고점 가능성
+
+**이동평균선 (MA)**
+└ 현재가 > MA → 저항선으로 작동
+└ 현재가 < MA → 지지선으로 작동
+└ MA20 < MA60 < MA120 순으로 저항 강도 ↑
+
+**피보나치 확장**
+└ 최근 저점~고점 폭 기준 상승 목표 구간
+└ 38.2% → 1차 / 61.8% → 2차 / 100% → 3차
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📋 **리서치 분석 해석**
+━━━━━━━━━━━━━━━━━━━━━━━━
+**목표가 추이**
+└ ✅ 상향 우세: 애널리스트들이 전망 상향 → 3차까지 보유 근거
+└ ❌ 하향 우세: 전망 악화 → 1~2차에서 조기 익절 고려
+└ ➡️ 유지: 현 수준 적정 판단
+
+**목표가 달성률 (현재가 ÷ 목표가 중간값)**
+└ 💚 50% 미만: 저평가 → 장기 보유 가능
+└ 🟢 50~75%: 여유 있음 → 3차까지 보유 유효
+└ 🟡 75~90%: 중간 → 2차 매도 구간
+└ 🟠 90~98%: 목표가 근접 → 1~2차 익절 고려
+└ 🔴 98% 이상: 목표가 도달 → 매도 적극 검토
+
+**컨센서스 스프레드 (증권사 간 목표가 차이)**
+└ ✅ 5% 미만: 의견 일치 → 목표가 신뢰도 높음
+└ 🟡 5~15%: 일부 차이 → 중간값 기준 판단
+└ 🟠 15% 이상: 불확실 → 보수적으로 하단 기준 접근
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ **주의사항**
+━━━━━━━━━━━━━━━━━━━━━━━━
+└ 본 분석은 기술적 지표 기반 참고용입니다
+└ 급등락, 공시, 시장 급변 상황은 반영되지 않습니다
+└ 최종 투자 결정은 반드시 본인 판단으로 하세요`;
+
+            await message.reply(sellHelp);
+
+        } else {
+            const rawInput = message.content.trim().slice('!매도'.length).trim();
+            const parts    = rawInput.split(/\s+/);
+
+            // 마지막 토큰이 숫자면 매수가, 나머지 전체가 종목명 (공백 포함 종목명 지원)
+            const lastPart = parts[parts.length - 1];
+            const lastIsNumber = parts.length > 1 && /^[\d,]+$/.test(lastPart);
+            const stockInput = lastIsNumber ? parts.slice(0, -1).join(' ') : rawInput;
+            const buyPrice   = lastIsNumber ? Math.round(parseFloat(lastPart.replace(/,/g, ''))) : null;
+
+            if (!stockInput) {
+                await message.reply('사용법: `!매도종목명` 또는 `!매도종목명 매수가`\n예) `!매도삼성전자` 또는 `!매도삼성전자 70000`');
+            } else {
+                const KR_LIST       = require('./data/krWatchList');
+                const KR_STOCK_LIST = require('./data/krStockList');
+                let ticker = null, stockName = stockInput;
+                const inputLower = stockInput.toLowerCase();
+
+                if (/^\d{6}$/.test(stockInput)) {
+                    ticker = stockInput;
+                    const found = KR_LIST.find(s => s.ticker === stockInput)
+                               || KR_STOCK_LIST.find(s => s.ticker === stockInput);
+                    if (found) stockName = found.name;
+                } else {
+                    const found = KR_LIST.find(s =>
+                                      s.name.toLowerCase() === inputLower ||
+                                      s.name.toLowerCase().includes(inputLower)
+                                  ) || KR_STOCK_LIST.find(s =>
+                                      s.name.toLowerCase() === inputLower ||
+                                      s.name.toLowerCase().includes(inputLower)
+                                  );
+                    if (found) { ticker = found.ticker; stockName = found.name; }
+                }
+
+                if (!ticker) {
+                    await message.reply(`❌ "${stockInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리 숫자)로 직접 입력하거나 워치리스트에 없는 종목인지 확인해 주세요.`);
+                } else {
+                    console.log(`[${time}] 매도 분석 요청: ${stockName}(${ticker}) 매수가=${buyPrice ?? '없음'}`);
+                    await message.reply(`📊 [${stockName}] 매도 타이밍 분석 중입니다... (약 20~30초 소요)`);
+                    try {
+                        const { analyzeSellSignals } = require('./services/screening/technicalService');
+                        const { scrapeAnalystTarget } = require('./services/screening/naverScraper');
+                        const { getKisAccessToken: getToken } = require('./kisAuth');
+
+                        const token = await getToken();
+                        const [signals, analystData] = await Promise.all([
+                            analyzeSellSignals(ticker, token),
+                            scrapeAnalystTarget(ticker),
+                        ]);
+
+                        if (!signals) {
+                            await message.reply('❌ 가격 데이터를 가져올 수 없습니다.');
+                        } else {
+                            await discordService.sendSellAnalysisMessage(stockName, ticker, signals, analystData, buyPrice);
+                            await message.reply(`✅ 분석 완료! 매도타이밍 채널을 확인해 주세요.`);
+                        }
+                    } catch (err) {
+                        console.error(`[${time}] 매도 분석 실패:`, err.message);
+                        await message.reply('❌ 분석 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
+                    }
+                }
+            }
+        }
+
+    } else if (command.startsWith('!영욱문')) {
+        const rawInput = message.content.trim().slice('!영욱문'.length).trim();
+
+        if (command === '!영욱문리포트산업') {
+            console.log(`[${time}] 유저 명령 수신: !영욱문리포트산업`);
+            await message.reply('📊 [영욱문리포트산업] WiseReport 산업 리포트 서머리 수집 중입니다...');
+            try {
+                const { scrapeWiseReportIndustrySummary } = require('./services/screening/naverScraper');
+                const reports = await scrapeWiseReportIndustrySummary();
+                if (!reports.length) {
+                    await message.reply('❌ 오늘 산업 리포트 데이터가 없습니다.');
+                } else {
+                    await discordService.sendWiseReportIndustrySummaryMessage(reports);
+                    await message.reply(`✅ 완료! 영욱문 채널을 확인해 주세요.`);
+                }
+            } catch (err) {
+                console.error(`[${time}] 영욱문리포트산업 실패:`, err.message);
+                await message.reply('❌ 리포트 수집 중 오류가 발생했습니다.');
+            }
+
+        } else if (command === '!영욱문리포트') {
+            console.log(`[${time}] 유저 명령 수신: !영욱문리포트`);
+            await message.reply('📋 [영욱문리포트] WiseReport 기업 리포트 서머리 수집 중입니다...');
+            try {
+                const { scrapeWiseReportSummary } = require('./services/screening/naverScraper');
+                const reports = await scrapeWiseReportSummary();
+                if (!reports.length) {
+                    await message.reply('❌ 오늘 리포트 데이터가 없습니다. (장 마감 후 또는 휴장일일 수 있습니다)');
+                } else {
+                    await discordService.sendWiseReportSummaryMessage(reports);
+                    await message.reply(`✅ 완료! 영욱문 채널을 확인해 주세요.`);
+                }
+            } catch (err) {
+                console.error(`[${time}] 영욱문리포트 실패:`, err.message);
+                await message.reply('❌ 리포트 수집 중 오류가 발생했습니다.');
+            }
+
+        } else if (!rawInput) {
+            await message.reply('사용법: `!영욱문종목명` 또는 `!영욱문티커`\n예) `!영욱문삼성전자` 또는 `!영욱문005930`');
+        } else {
+            const KR_LIST      = require('./data/krWatchList');
+            const KR_STOCK_LIST = require('./data/krStockList');
+            let ticker = null, stockName = rawInput;
+            const inputLower = rawInput.toLowerCase();
+
+            if (/^\d{6}$/.test(rawInput)) {
+                ticker = rawInput;
+                const found = KR_LIST.find(s => s.ticker === rawInput)
+                           || KR_STOCK_LIST.find(s => s.ticker === rawInput);
+                if (found) stockName = found.name;
+            } else {
+                const found = KR_LIST.find(s =>
+                                  s.name.toLowerCase() === inputLower ||
+                                  s.name.toLowerCase().includes(inputLower)
+                              ) || KR_STOCK_LIST.find(s =>
+                                  s.name.toLowerCase() === inputLower ||
+                                  s.name.toLowerCase().includes(inputLower)
+                              );
+                if (found) { ticker = found.ticker; stockName = found.name; }
+            }
+
+            if (!ticker) {
+                await message.reply(`❌ "${rawInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리 숫자)로 직접 입력해 주세요. 예) \`!영욱문005930\``);
+            } else {
+                console.log(`[${time}] 영욱문 분석 요청: ${stockName}(${ticker})`);
+                await message.reply(`🔍 [${stockName}] 종목 분석 중입니다... (약 20~30초 소요)`);
+                try {
+                    const { analyzeTechnicals, getInvestorTrend, getStockCurrentPrice } = require('./services/screening/technicalService');
+                    const { scrapeAnalystTarget, scrapeConsensus, scrapeDividendInfo } = require('./services/screening/naverScraper');
+                    const { getKisAccessToken: getToken } = require('./kisAuth');
+
+                    const token = await getToken();
+
+                    // 워치리스트에 없는 종목(티커 직접 입력): KIS에서 종목명 조회
+                    if (stockName === rawInput && /^\d{6}$/.test(stockName)) {
+                        const priceInfo = await getStockCurrentPrice(ticker, token);
+                        if (priceInfo?.name) stockName = priceInfo.name;
+                    }
+
+                    // KIS 호출(기술지표+수급)과 Naver 스크래핑을 병렬 실행
+                    const [[tech, investor], [analystData, consensus, dividendInfo]] = await Promise.all([
+                        (async () => {
+                            const t   = await analyzeTechnicals(ticker, token);
+                            const inv = await getInvestorTrend(ticker, token);
+                            return [t, inv];
+                        })(),
+                        (async () => {
+                            const a = await scrapeAnalystTarget(ticker, { maxDaysOld: null });
+                            const c = await scrapeConsensus(ticker);
+                            const d = await scrapeDividendInfo(ticker);
+                            return [a, c, d];
+                        })(),
+                    ]);
+
+                    await discordService.sendYoungookMessage(stockName, ticker, tech, investor, analystData, consensus, dividendInfo);
+                    await message.reply(`✅ 분석 완료! 영욱문 채널을 확인해 주세요.`);
+                } catch (err) {
+                    console.error(`[${time}] 영욱문 분석 실패:`, err.message);
+                    await message.reply('❌ 분석 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
+                }
+            }
+        }
+
     } else if (command === '!도움말' || command === '!사용법') {
         const helpText = `**🤖 영욱문AI비서 명령어 사용법**
 
@@ -484,8 +761,34 @@ client.on('messageCreate', async (message) => {
 └ 8점 이상 종목만 영무문 채널 전송 (약 5~10분 소요)
 
 \`!영무문2\`
-└ 네이버 종목분석 리포트 최근 60건 수집
+└ 네이버 종목분석 리포트 최근 90건 수집
 └ 종목별 그룹핑 후 리포트 수 순위 + 목표주가 범위 표시
+
+\`!영욱문종목명\` / \`!영욱문티커\`
+└ 단일 종목 종합 심층 분석
+└ 증권사 목표가(90일) · 컨센서스 영업이익 · PER/PBR 추이
+└ MA정배열 · RSI · 골든크로스 · 외국인/기관 수급 동향
+└ 예: \`!영욱문삼성전자\` 또는 \`!영욱문005930\`
+└ 결과는 **영욱문** 채널로 전송
+
+\`!영욱문리포트\`
+└ 당일 WiseReport 기업 리포트 서머리
+└ Buy 종목 상승여력 순 상위 10건 · 목표가/전일가/핵심요약 표시
+└ 결과는 **영욱문** 채널로 전송
+
+\`!영욱문리포트산업\`
+└ 당일 WiseReport 산업 리포트 서머리
+└ 투자의견 변경(상향↑/하향↓) 표시 · 핵심요약 2포인트 표시
+└ 결과는 **영욱문** 채널로 전송
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📤 **매도 타이밍 분석**
+━━━━━━━━━━━━━━━━━━━━━━━━
+\`!매도종목명\` / \`!매도종목명 매수가\`
+└ 1차/2차/3차 분할 매도가 + 손절 라인 분석
+└ MA·피보나치·애널리스트 목표가 기반
+└ 예: \`!매도삼성전자\` 또는 \`!매도삼성전자 70000\`
+└ 결과는 **매도타이밍** 채널로 전송
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 📌 \`!도움말\` 또는 \`!사용법\` 으로 이 화면을 다시 볼 수 있습니다.`;
