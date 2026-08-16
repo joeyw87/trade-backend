@@ -425,6 +425,62 @@ async function sendMoo2Message(top10, priceMap = {}, consensusMap = {}) {
 }
 
 // ════════════════════════════════════════════════════════
+// 영무문시뮬 — DCA 시뮬레이션 결과 전송
+// simResults: calcDcaSimulation() 반환값 배열
+// ════════════════════════════════════════════════════════
+async function sendMooSimulMessage(name, ticker, currentPrice, simResults) {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_MOO_URL;
+    if (!webhookUrl) return;
+
+    const chartUrl = `https://finance.naver.com/item/main.naver?code=${ticker}`;
+    const lines = [];
+    lines.push(`💰 현재가: **[${currentPrice.toLocaleString()}원](${chartUrl})**`);
+    lines.push('');
+
+    for (const r of simResults) {
+        if (r.error) {
+            lines.push(`━━ 📅 ${r.label} ━━`);
+            lines.push(`⚠️ ${r.error}`);
+            lines.push('');
+            continue;
+        }
+
+        const shortfall = r.actualDays < r.targetDays
+            ? ` ⚠️ ${r.actualDays}일치만 존재`
+            : '';
+        const icon = r.returnRate >= 15 ? '🔥'
+                   : r.returnRate >=  5 ? '🟢'
+                   : r.returnRate >=  0 ? '🟡'
+                   :                      '🔻';
+        const sign = r.returnRate >= 0 ? '+' : '';
+
+        lines.push(`━━ 📅 ${r.label} (${r.actualDays}영업일${shortfall}) ━━`);
+        lines.push(`매입 주수:    **${r.shares.toLocaleString()}주**`);
+        lines.push(`총 투자금:    **${r.totalInvested.toLocaleString()}원**`);
+        lines.push(`평균 매입가:  ${r.avgBuyPrice.toLocaleString()}원`);
+        lines.push(`현재 평가금:  ${r.currentValue.toLocaleString()}원`);
+        lines.push(`수익금:       ${r.profit >= 0 ? '+' : ''}${r.profit.toLocaleString()}원`);
+        lines.push(`수익률:       ${icon} **${sign}${r.returnRate}%**`);
+        lines.push('');
+    }
+
+    const embed = {
+        title: `📈 [${name}(${ticker})] DCA 시뮬레이션 — 매일 1주 매입`,
+        description: lines.join('\n'),
+        color: 5814783,
+        footer: { text: '수정주가 기준 · 수수료/세금 미반영 · 참고용' },
+        timestamp: new Date().toISOString(),
+    };
+
+    try {
+        await axios.post(webhookUrl, { embeds: [embed] });
+        console.log(`✅ [디스코드] 영무문시뮬 전송 완료! (${name})`);
+    } catch (error) {
+        console.error('❌ [디스코드] 영무문시뮬 전송 실패:', error.message);
+    }
+}
+
+// ════════════════════════════════════════════════════════
 // 매도 타이밍 분석 결과 전송
 // ════════════════════════════════════════════════════════
 async function sendSellAnalysisMessage(name, ticker, signals, analystData, buyPrice = null) {
@@ -1044,6 +1100,7 @@ module.exports = {
     sendJypIntradayAlertMessage,
     sendMooScreeningMessage,
     sendMoo2Message,
+    sendMooSimulMessage,
     sendSellAnalysisMessage,
     sendYoungookMessage,
     sendWiseReportSummaryMessage,

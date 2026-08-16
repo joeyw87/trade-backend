@@ -297,6 +297,12 @@ client.once('clientReady', () => {
     console.log(`\n💬 디스코드 양방향 통신 준비 완료! AI비서 ...`);
 });
 
+// 종목명 검색 우선순위: 완전일치 → startsWith → includes
+const findStock = (list, inputLower) =>
+    list.find(s => s.name.toLowerCase() === inputLower) ||
+    list.find(s => s.name.toLowerCase().startsWith(inputLower)) ||
+    list.find(s => s.name.toLowerCase().includes(inputLower));
+
 // 채팅방에 메시지가 올라올 때마다 실행되는 핵심 로직!
 client.on('messageCreate', async (message) => {
     // 1. 봇이 스스로 보낸 메시지거나, '!'로 시작하지 않는 일반 대화는 무시합니다.
@@ -358,6 +364,62 @@ client.on('messageCreate', async (message) => {
         console.log(`[${time}] 유저 명령 수신: !미국RSI (limit: ${limit})`);
         await message.reply(`📊 [🇺🇸 미국주식 RSI 과매도] ${limit}개 종목 스캔 시작합니다.`);
         await sendDiscordHeartbeat('US_RSI', limit);
+
+    } else if (command.startsWith('!영무문시뮬')) {
+        const rawInput = message.content.trim().slice('!영무문시뮬'.length).trim();
+
+        if (!rawInput) {
+            await message.reply('사용법: `!영무문시뮬종목명` 또는 `!영무문시뮬티커`\n예) `!영무문시뮬삼성전자` 또는 `!영무문시뮬005930`');
+        } else {
+            const KR_LIST       = require('./data/krWatchList');
+            const KR_STOCK_LIST = require('./data/krStockList');
+            let ticker = null, stockName = rawInput;
+            const inputLower = rawInput.toLowerCase();
+
+            if (/^[A-Z0-9]{6}$/i.test(rawInput)) {
+                ticker = rawInput.toUpperCase();
+                const found = KR_LIST.find(s => s.ticker === ticker)
+                           || KR_STOCK_LIST.find(s => s.ticker === ticker);
+                if (found) stockName = found.name;
+            } else {
+                const found = findStock(KR_LIST, inputLower) || findStock(KR_STOCK_LIST, inputLower);
+                if (found) { ticker = found.ticker; stockName = found.name; }
+            }
+
+            if (!ticker) {
+                await message.reply(`❌ "${rawInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리)로 직접 입력해 주세요. 예) \`!영무문시뮬005930\` 또는 \`!영무문시뮬0167A0\``);
+            } else {
+                console.log(`[${time}] 영무문시뮬 요청: ${stockName}(${ticker})`);
+                await message.reply(`📈 [${stockName}] DCA 시뮬레이션 중입니다... (1년치 일봉 수집, 약 15~20초 소요)`);
+                try {
+                    const { fetchDailyPriceHistory, calcDcaSimulation, getStockCurrentPrice } = require('./services/screening/technicalService');
+                    const { getKisAccessToken: getToken } = require('./kisAuth');
+
+                    const token = await getToken();
+
+                    if (stockName === rawInput && /^[A-Z0-9]{6}$/i.test(stockName)) {
+                        const priceInfo = await getStockCurrentPrice(ticker, token);
+                        if (priceInfo?.name) stockName = priceInfo.name;
+                    }
+
+                    const [priceHistory, priceInfo] = await Promise.all([
+                        fetchDailyPriceHistory(ticker, token),
+                        getStockCurrentPrice(ticker, token),
+                    ]);
+
+                    if (!priceInfo || !priceHistory.length) {
+                        await message.reply('❌ 가격 데이터를 가져올 수 없습니다.');
+                    } else {
+                        const simResults = calcDcaSimulation(priceHistory, priceInfo.price);
+                        await discordService.sendMooSimulMessage(stockName, ticker, priceInfo.price, simResults);
+                        await message.reply(`✅ 완료! 영무문 채널을 확인해 주세요.`);
+                    }
+                } catch (err) {
+                    console.error(`[${time}] 영무문시뮬 실패:`, err.message);
+                    await message.reply('❌ 시뮬레이션 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
+                }
+            }
+        }
 
     } else if (command === '!영무문') {
         console.log(`[${time}] 유저 명령 수신: !영무문`);
@@ -555,24 +617,18 @@ client.on('messageCreate', async (message) => {
                 let ticker = null, stockName = stockInput;
                 const inputLower = stockInput.toLowerCase();
 
-                if (/^\d{6}$/.test(stockInput)) {
-                    ticker = stockInput;
-                    const found = KR_LIST.find(s => s.ticker === stockInput)
-                               || KR_STOCK_LIST.find(s => s.ticker === stockInput);
+                if (/^[A-Z0-9]{6}$/i.test(stockInput)) {
+                    ticker = stockInput.toUpperCase();
+                    const found = KR_LIST.find(s => s.ticker === ticker)
+                               || KR_STOCK_LIST.find(s => s.ticker === ticker);
                     if (found) stockName = found.name;
                 } else {
-                    const found = KR_LIST.find(s =>
-                                      s.name.toLowerCase() === inputLower ||
-                                      s.name.toLowerCase().includes(inputLower)
-                                  ) || KR_STOCK_LIST.find(s =>
-                                      s.name.toLowerCase() === inputLower ||
-                                      s.name.toLowerCase().includes(inputLower)
-                                  );
+                    const found = findStock(KR_LIST, inputLower) || findStock(KR_STOCK_LIST, inputLower);
                     if (found) { ticker = found.ticker; stockName = found.name; }
                 }
 
                 if (!ticker) {
-                    await message.reply(`❌ "${stockInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리 숫자)로 직접 입력하거나 워치리스트에 없는 종목인지 확인해 주세요.`);
+                    await message.reply(`❌ "${stockInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리)로 직접 입력하거나 워치리스트에 없는 종목인지 확인해 주세요.`);
                 } else {
                     console.log(`[${time}] 매도 분석 요청: ${stockName}(${ticker}) 매수가=${buyPrice ?? '없음'}`);
                     await message.reply(`📊 [${stockName}] 매도 타이밍 분석 중입니다... (약 20~30초 소요)`);
@@ -646,24 +702,18 @@ client.on('messageCreate', async (message) => {
             let ticker = null, stockName = rawInput;
             const inputLower = rawInput.toLowerCase();
 
-            if (/^\d{6}$/.test(rawInput)) {
-                ticker = rawInput;
-                const found = KR_LIST.find(s => s.ticker === rawInput)
-                           || KR_STOCK_LIST.find(s => s.ticker === rawInput);
+            if (/^[A-Z0-9]{6}$/i.test(rawInput)) {
+                ticker = rawInput.toUpperCase();
+                const found = KR_LIST.find(s => s.ticker === ticker)
+                           || KR_STOCK_LIST.find(s => s.ticker === ticker);
                 if (found) stockName = found.name;
             } else {
-                const found = KR_LIST.find(s =>
-                                  s.name.toLowerCase() === inputLower ||
-                                  s.name.toLowerCase().includes(inputLower)
-                              ) || KR_STOCK_LIST.find(s =>
-                                  s.name.toLowerCase() === inputLower ||
-                                  s.name.toLowerCase().includes(inputLower)
-                              );
+                const found = findStock(KR_LIST, inputLower) || findStock(KR_STOCK_LIST, inputLower);
                 if (found) { ticker = found.ticker; stockName = found.name; }
             }
 
             if (!ticker) {
-                await message.reply(`❌ "${rawInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리 숫자)로 직접 입력해 주세요. 예) \`!영욱문005930\``);
+                await message.reply(`❌ "${rawInput}" 종목을 찾을 수 없습니다.\n티커 코드(6자리)로 직접 입력해 주세요. 예) \`!영욱문005930\``);
             } else {
                 console.log(`[${time}] 영욱문 분석 요청: ${stockName}(${ticker})`);
                 await message.reply(`🔍 [${stockName}] 종목 분석 중입니다... (약 20~30초 소요)`);
@@ -675,7 +725,7 @@ client.on('messageCreate', async (message) => {
                     const token = await getToken();
 
                     // 워치리스트에 없는 종목(티커 직접 입력): KIS에서 종목명 조회
-                    if (stockName === rawInput && /^\d{6}$/.test(stockName)) {
+                    if (stockName === rawInput && /^[A-Z0-9]{6}$/i.test(stockName)) {
                         const priceInfo = await getStockCurrentPrice(ticker, token);
                         if (priceInfo?.name) stockName = priceInfo.name;
                     }
@@ -705,94 +755,107 @@ client.on('messageCreate', async (message) => {
         }
 
     } else if (command === '!도움말' || command === '!사용법') {
-        const helpText = `**🤖 영욱문AI비서 명령어 사용법**
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-🇰🇷 **국내주식**
-━━━━━━━━━━━━━━━━━━━━━━━━
-\`!국내엔벨\`
-└ 20일 이동평균선 -10% 이하로 내려온 낙폭과대 종목 스캔
-└ 자동 실행: 08:30 / 09:00 / 13:00 / 14:00 / 15:00
-
-\`!국내종가\`
-└ 당일 고저가 대비 상단 80% 이상 위치한 종가베팅 후보 스캔
-└ 자동 실행: 15:05 / 15:15 / 15:25
-
-\`!국내RSI\`
-└ RSI(14) 30 이하 과매도 종목 스캔 (반등 타점 탐색)
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-🇺🇸 **미국주식**
-━━━━━━━━━━━━━━━━━━━━━━━━
-\`!미국엔벨\` / \`!미국엔벨[숫자]\`
-└ 20일선 -10% 이하 낙폭과대 종목 스캔
-└ 예: \`!미국엔벨50\` → 상위 50개만 스캔 (기본값 200)
-└ 자동 실행: 22:30 / 00:30 / 01:00 등 장 초반
-
-\`!미국종가\` / \`!미국종가[숫자]\`
-└ 당일 고저가 상단 80% + 시총 1억달러 이상 종가베팅 후보 스캔
-└ 예: \`!미국종가100\` → 상위 100개만 스캔 (기본값 200)
-└ 자동 실행: 04:45 / 04:55 (서머타임 장마감 직전)
-
-\`!미국RSI\` / \`!미국RSI[숫자]\`
-└ RSI(14) 30 이하 과매도 종목 스캔
-└ 예: \`!미국RSI50\` → 상위 50개만 스캔 (기본값 200)
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 **JYP 픽 관심종목**
-━━━━━━━━━━━━━━━━━━━━━━━━
-\`!미국JYP\`
-└ JYP 픽 전종목 현재 시세 조회
-└ 섹터별 그룹 표시 / 등락률 / 52주 고가 대비 위치 표시
-
-\`!미국JYP저점\` / \`!미국JYP저점[숫자]\`
-└ 당일 5분봉 기준 장중 최저가 근처에 있는 종목만 알림
-└ 숫자는 최저가 대비 허용 오차(%) — 낮을수록 더 타이트
-└ 예: \`!미국JYP저점3\` → 저점 대비 +3% 이내 (기본값 3%)
-└ 예: \`!미국JYP저점5\` → 저점 대비 +5% 이내
-└ ⚠️ 미국 장 시간(KST 22:30~05:00) 중에만 의미 있는 데이터
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-🔍 **종목 발굴**
-━━━━━━━━━━━━━━━━━━━━━━━━
-\`!영무문\`
-└ 골든크로스 기본조건 통과 종목에 다중 지표 스코어링
-└ 정배열·거래량급증·외국인/기관순매수·RSI·목표가상향·컨센서스상회
-└ 8점 이상 종목만 영무문 채널 전송 (약 5~10분 소요)
-
-\`!영무문2\`
-└ 네이버 종목분석 리포트 최근 90건 수집
-└ 종목별 그룹핑 후 리포트 수 순위 + 목표주가 범위 표시
-
-\`!영욱문종목명\` / \`!영욱문티커\`
-└ 단일 종목 종합 심층 분석
-└ 증권사 목표가(90일) · 컨센서스 영업이익 · PER/PBR 추이
-└ MA정배열 · RSI · 골든크로스 · 외국인/기관 수급 동향
-└ 예: \`!영욱문삼성전자\` 또는 \`!영욱문005930\`
-└ 결과는 **영욱문** 채널로 전송
-
-\`!영욱문리포트\`
-└ 당일 WiseReport 기업 리포트 서머리
-└ Buy 종목 상승여력 순 상위 10건 · 목표가/전일가/핵심요약 표시
-└ 결과는 **영욱문** 채널로 전송
-
-\`!영욱문리포트산업\`
-└ 당일 WiseReport 산업 리포트 서머리
-└ 투자의견 변경(상향↑/하향↓) 표시 · 핵심요약 2포인트 표시
-└ 결과는 **영욱문** 채널로 전송
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-📤 **매도 타이밍 분석**
-━━━━━━━━━━━━━━━━━━━━━━━━
-\`!매도종목명\` / \`!매도종목명 매수가\`
-└ 1차/2차/3차 분할 매도가 + 손절 라인 분석
-└ MA·피보나치·애널리스트 목표가 기반
-└ 예: \`!매도삼성전자\` 또는 \`!매도삼성전자 70000\`
-└ 결과는 **매도타이밍** 채널로 전송
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-📌 \`!도움말\` 또는 \`!사용법\` 으로 이 화면을 다시 볼 수 있습니다.`;
-        message.reply(helpText);
+        const helpEmbed = {
+            title: '🤖 영욱문AI비서 명령어 사용법',
+            color: 5814783,
+            fields: [
+                {
+                    name: '🇰🇷 국내주식',
+                    value: [
+                        '`!국내엔벨`',
+                        '└ 20일선 -10% 이하 낙폭과대 종목 스캔',
+                        '└ 자동: 08:30 / 08:50 / 09:00 / 09:10 / 13:00 / 14:00 / 15:00',
+                        '',
+                        '`!국내종가`',
+                        '└ 당일 고저가 상단 80% 이상 종가베팅 후보 스캔',
+                        '└ 자동: 15:05 / 15:15 / 15:25',
+                        '',
+                        '`!국내RSI`',
+                        '└ RSI(14) 30 이하 과매도 종목 스캔',
+                    ].join('\n'),
+                    inline: false,
+                },
+                {
+                    name: '🇺🇸 미국주식',
+                    value: [
+                        '`!미국엔벨` / `!미국엔벨[숫자]`',
+                        '└ 20일선 -10% 이하 낙폭과대 종목 스캔 (기본 200개)',
+                        '└ 자동: 22:10~23:00 / 23:30 / 00:00 / 00:30 / 01:00',
+                        '',
+                        '`!미국종가` / `!미국종가[숫자]`',
+                        '└ 고저가 상단 80% + 시총 1억달러↑ 종가베팅 스캔 (기본 200개)',
+                        '└ 자동: 04:45 / 04:55 / 06:40 / 07:00 / 07:30',
+                        '',
+                        '`!미국RSI` / `!미국RSI[숫자]`',
+                        '└ RSI(14) 30 이하 과매도 종목 스캔 (기본 200개)',
+                    ].join('\n'),
+                    inline: false,
+                },
+                {
+                    name: '🎯 JYP 픽 관심종목',
+                    value: [
+                        '`!미국JYP`',
+                        '└ JYP 픽 전종목 시세 · 섹터별 · 등락률 · 52주 고점 대비',
+                        '',
+                        '`!미국JYP저점` / `!미국JYP저점[숫자]`',
+                        '└ 당일 장중 최저가 근처 종목만 알림',
+                        '└ 예: `!미국JYP저점3` → 저점 대비 +3% 이내 (기본 3%)',
+                        '└ ⚠️ 미국 장 시간(KST 22:30~05:00) 중만 유효',
+                    ].join('\n'),
+                    inline: false,
+                },
+                {
+                    name: '🔍 종목 발굴 — 영무문',
+                    value: [
+                        '`!영무문시뮬종목명` / `!영무문시뮬티커`',
+                        '└ 매일 1주씩 DCA 매입 시뮬 (3개월/6개월/1년 수익률)',
+                        '└ 예: `!영무문시뮬삼성전자` · 소요 15~20초 · **영무문** 채널',
+                        '',
+                        '`!영무문`',
+                        '└ 골든크로스 통과 종목 다중 지표 스코어링 (8점↑만 전송)',
+                        '└ 소요 5~10분 · **영무문** 채널',
+                        '',
+                        '`!영무문2`',
+                        '└ 네이버 리포트 최근 90건 · 리포트 수 순위 상위 12종목 + 목표가 범위',
+                        '└ **영무문** 채널',
+                    ].join('\n'),
+                    inline: false,
+                },
+                {
+                    name: '🔬 심층 분석 — 영욱문',
+                    value: [
+                        '`!영욱문종목명` / `!영욱문티커`',
+                        '└ 증권사 목표가(기간 제한 없음) · 컨센서스 영업이익 · PER/PBR 추이',
+                        '└ MA/RSI/골든크로스/볼린저밴드/모멘텀(1주·1개월·3개월)',
+                        '└ 외국인/기관 수급 동향 · 배당 DPS 추이 · 배당수익률',
+                        '└ **영욱문** 채널',
+                        '',
+                        '`!영욱문리포트`',
+                        '└ WiseReport 기업 리포트 Buy 상승여력 상위 10건',
+                        '└ 자동: 평일 08:00 · **영욱문** 채널',
+                        '',
+                        '`!영욱문리포트산업`',
+                        '└ WiseReport 산업 리포트 · 투자의견 변경 강조',
+                        '└ 자동: 평일 08:00 · **영욱문** 채널',
+                    ].join('\n'),
+                    inline: false,
+                },
+                {
+                    name: '📤 매도 타이밍 분석',
+                    value: [
+                        '`!매도종목명` / `!매도종목명 매수가`',
+                        '└ 1차/2차/3차 분할 매도가 + 손절 라인 분석',
+                        '└ MA · 피보나치 · 애널리스트 목표가 기반',
+                        '└ 예: `!매도삼성전자` 또는 `!매도삼성전자 70000`',
+                        '└ 상세 판단 기준: `!매도사용법`  · **매도타이밍** 채널',
+                    ].join('\n'),
+                    inline: false,
+                },
+            ],
+            footer: { text: '!도움말 또는 !사용법 으로 이 화면을 다시 볼 수 있습니다.' },
+            timestamp: new Date().toISOString(),
+        };
+        await message.reply({ embeds: [helpEmbed] });
     }
 });
 

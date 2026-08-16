@@ -241,6 +241,94 @@ async function getStockCurrentPrice(ticker, token) {
 }
 
 // ════════════════════════════════════════════════════════
+// 영무문시뮬 — 1년치 일봉 조회
+// inquire-daily-itemchartprice(FHKST03010100): 시작·종료일 범위 지정 가능
+// 4구간 × 100 calendar days ≈ 280 거래일 (1년+)
+// ════════════════════════════════════════════════════════
+async function fetchDailyPriceHistory(ticker, token) {
+    const toDateStr = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+
+    const SEG_DAYS = 100;  // 구간당 calendar days (≈ 70 거래일)
+    const SEGMENTS = 4;
+
+    const allData = [];
+    for (let i = 0; i < SEGMENTS; i++) {
+        const endDate   = new Date(); endDate.setDate(endDate.getDate() - i * SEG_DAYS);
+        const startDate = new Date(); startDate.setDate(startDate.getDate() - (i + 1) * SEG_DAYS);
+
+        try {
+            const res = await axios.get(
+                `${KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`,
+                {
+                    headers: getKisHeaders(token, 'FHKST03010100'),
+                    params: {
+                        FID_COND_MRKT_DIV_CODE: 'J',
+                        FID_INPUT_ISCD:         ticker,
+                        FID_INPUT_DATE_1:       toDateStr(startDate),
+                        FID_INPUT_DATE_2:       toDateStr(endDate),
+                        FID_PERIOD_DIV_CODE:    'D',
+                        FID_ORG_ADJ_PRC:        '1',
+                    }
+                }
+            );
+            const batch = res.data.output2 || [];
+            console.log(`  [${ticker}] 일봉 구간 ${i + 1}: ${toDateStr(startDate)}~${toDateStr(endDate)} → ${batch.length}건`);
+            allData.push(...batch);
+        } catch (err) {
+            console.warn(`  [${ticker}] 일봉 구간 ${i + 1} 조회 실패:`, err.response?.data?.msg1 || err.message);
+        }
+        await delay(500);
+    }
+
+    const seen = new Set();
+    return allData
+        .filter((d) => {
+            if (seen.has(d.stck_bsop_date)) return false;
+            seen.add(d.stck_bsop_date);
+            return true;
+        })
+        .sort((a, b) => b.stck_bsop_date.localeCompare(a.stck_bsop_date));
+}
+
+// ════════════════════════════════════════════════════════
+// 영무문시뮬 — 구간별 DCA 수익률 계산
+// priceHistory: 최신순 정렬 배열 (stck_clpr 포함)
+// ════════════════════════════════════════════════════════
+function calcDcaSimulation(priceHistory, currentPrice) {
+    const PERIODS = [
+        { label: '3개월', days: 63 },
+        { label: '6개월', days: 126 },
+        { label: '1년',   days: 252 },
+    ];
+
+    return PERIODS.map(({ label, days }) => {
+        const slice = priceHistory.slice(0, days);
+        const actualDays = slice.length;
+
+        if (actualDays < 5) return { label, targetDays: days, error: '데이터 부족' };
+
+        const totalInvested = slice.reduce((sum, d) => sum + Number(d.stck_clpr), 0);
+        const shares = actualDays;
+        const currentValue = shares * currentPrice;
+        const profit = currentValue - totalInvested;
+        const returnRate = parseFloat(((profit / totalInvested) * 100).toFixed(2));
+        const avgBuyPrice = Math.round(totalInvested / shares);
+
+        return {
+            label,
+            targetDays: days,
+            actualDays,
+            shares,
+            totalInvested: Math.round(totalInvested),
+            avgBuyPrice,
+            currentValue: Math.round(currentValue),
+            profit: Math.round(profit),
+            returnRate,
+        };
+    });
+}
+
+// ════════════════════════════════════════════════════════
 // 매도 타이밍 분석 — 저항선·피보나치·RSI 종합
 // ════════════════════════════════════════════════════════
 async function analyzeSellSignals(ticker, token) {
@@ -268,4 +356,4 @@ async function analyzeSellSignals(ticker, token) {
     return { currentPrice, ma20, ma60, ma120, ma240, rsi, recentHigh, recentLow, fib382, fib618, fib100 };
 }
 
-module.exports = { analyzeTechnicals, getInvestorTrend, getStockCurrentPrice, analyzeSellSignals };
+module.exports = { analyzeTechnicals, getInvestorTrend, getStockCurrentPrice, analyzeSellSignals, fetchDailyPriceHistory, calcDcaSimulation };
